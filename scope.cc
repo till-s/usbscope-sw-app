@@ -4,35 +4,94 @@
 #include <QMenu>
 #include <QLabel>
 #include <QAction>
+#include <QSlider>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QFormLayout>
 #include <QLineEdit>
 #include <QValidator>
 #include <QPushButton>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <memory>
 #include <stdio.h>
 #include <getopt.h>
 #include <FWComm.hpp>
 #include <AcqCtrl.hpp>
 #include <ADCClk.hpp>
+#include <PGA.hpp>
+#include <FEC.hpp>
+#include <LED.hpp>
 #include <vector>
+#include <utility>
+#include <math.h>
+#include <stdlib.h>
 
 using std::unique_ptr;
-using std::make_unique;
+using std::shared_ptr;
+using std::make_shared;
+using std::vector;
+
+class MessageDialog : public QDialog {
+	QLabel *lbl_;
+public:
+	MessageDialog( QWidget *parent, const QString *title = NULL )
+	: QDialog( parent )
+	{
+		if ( title ) {
+			setWindowTitle( *title );
+		}
+		auto buttonBox = unique_ptr<QDialogButtonBox>( new QDialogButtonBox( QDialogButtonBox::Ok ) );
+		QObject::connect( buttonBox.get(), &QDialogButtonBox::accepted, this, &QDialog::accept );
+
+		auto lay       = unique_ptr<QVBoxLayout>( new QVBoxLayout() );
+		auto lbl       = unique_ptr<QLabel>     ( new QLabel()      );
+		lbl_           = lbl.get();
+		lay->addWidget( lbl.release() );
+		lay->addWidget( buttonBox.release() );
+		setLayout( lay.release() );
+	}
+
+	virtual void
+	setText(const QString &msg)
+	{
+		lbl_->setText( msg );
+	}
+	
+};
 
 
-class Scope {
+class Scope : public QObject {
 private:
-	FWPtr                   fw_;
-	unique_ptr<QMainWindow> mainWin_;
-	AcqCtrl                 acq_;
-	ADCClkPtr               adcClk_;
-	unsigned                decimation_;
-	bool                    sim_;
+	FWPtr                                 fw_;
+	unique_ptr<QMainWindow>               mainWin_;
+	AcqCtrl                               acq_;
+	ADCClkPtr                             adcClk_;
+	PGAPtr                                pga_;
+	LEDPtr                                leds_;
+	FECPtr                                fec_;
+	unsigned                              decimation_;
+	bool                                  sim_;
+	vector<QWidget*>                      vOverRange_;
+	vector<QColor>                        vChannelColors_;
+	vector<QString>                       vChannelNames_;
+	vector<QLabel*>                       vMeanLbls_;
+	vector<QLabel*>                       vStdLbls_;
+	shared_ptr<MessageDialog>             msgDialog_;
+
+	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
+	mkGainControls( int channel, QColor &color );
 
 public:
-	Scope(FWPtr fw, bool sim=false);
+	Scope(FWPtr fw, bool sim=false, QObject *parent = NULL);
+
+	const QString *
+	getChannelName(int channel)
+	{
+		if ( channel < 0 || channel >= vChannelNames_.size() )
+			throw std::invalid_argument( "invalid channel idx" );
+		return &vChannelNames_[channel];
+	}
 
 	bool
 	isSim() const
@@ -44,6 +103,24 @@ public:
 	acq()
 	{
 		return &acq_;
+	}
+
+	PGAPtr
+	pga()
+	{
+		return pga_;
+	}
+
+	FECPtr
+	fec()
+	{
+		return fec_;
+	}
+	
+	LEDPtr
+	leds()
+	{
+		return leds_;
 	}
 
 	unsigned
@@ -96,6 +173,20 @@ public:
 	{
 		printf("FIME -- TODO\n");
 	}
+
+	void
+	quit()
+	{
+		exit(0);
+	}
+
+	void
+	message( const QString &s )
+	{
+		msgDialog_->setText( s );
+		msgDialog_->exec();
+	}
+
 };
 
 class TxtAction;
@@ -126,7 +217,7 @@ public:
 
 class MenuButton : public QPushButton, public TxtActionVisitor {
 public:
-	MenuButton( const std::vector<QString> &lbls, QWidget *parent )
+	MenuButton( const vector<QString> &lbls, QWidget *parent )
 	: QPushButton( parent )
 	{
 		auto menu = new QMenu( this );
@@ -166,12 +257,12 @@ class TrigSrcMenu : public MenuButton {
 private:
 	Scope   *scp_;
 
-	static std::vector<QString>
+	static vector<QString>
 	mkStrings(Scope *scp)
 	{
 		TriggerSource src;
 		scp->acq()->getTriggerSrc( &src, NULL );
-		std::vector<QString> rv;
+		vector<QString> rv;
 		switch ( src ) {
 			case CHA:
 				rv.push_back( "Channel A" );
@@ -188,7 +279,7 @@ private:
 		rv.push_back( "External"  );
 		return rv;	
 	}
-	
+
 public:
 	TrigSrcMenu(Scope *scp, QWidget *parent = NULL)
 	: MenuButton( mkStrings( scp ), parent ),
@@ -216,16 +307,129 @@ public:
 	}
 };
 
+class TglButton : public QPushButton {
+protected:
+	Scope             *scp_;
+	vector<QString>    lbls_;
+public:
+	TglButton( Scope *scp, const vector<QString> &lbls, QWidget * parent = NULL )
+	: QPushButton( parent ),
+	  scp_  ( scp  ),
+	  lbls_ ( lbls )
+	{
+		setCheckable  ( true  );
+		setAutoDefault( false );
+		QObject::connect( this, &QPushButton::toggled, this, &TglButton::activated );
+	}
+
+	virtual void
+	setLbl(bool checked)
+	{
+		if ( checked ) {
+			setText( lbls_[0] );
+		} else {
+			setText( lbls_[1] );
+		}
+		setChecked( checked );
+	}
+
+	void
+	activated(bool checked)
+	{
+		setLbl( checked );
+		setVal( checked );
+	}
+
+	virtual void setVal(bool) = 0;
+	virtual bool getVal(    ) = 0;
+};
+
+class FECTerminationTgl : public TglButton {
+private:
+	int                 channel_;
+	std::string         ledName_;
+public:
+
+	FECTerminationTgl( Scope *scp, int channel, QWidget * parent = NULL )
+	: TglButton( scp, vector<QString>( {"50Ohm", "1MOhm" } ), parent ),
+	  channel_( channel ),
+	  ledName_( std::string("Term") + scp->getChannelName( channel )->toStdString() )
+	{
+		bool v = getVal();
+		setLbl( v );
+		scp_->leds()->setVal( ledName_, v );
+	}
+
+	virtual void setVal(bool checked) override
+	{
+		scp_->fec()->setTermination( channel_, checked );
+		scp_->leds()->setVal( ledName_, checked );
+	}
+
+	virtual bool getVal() override
+	{
+		return scp_->fec()->getTermination( channel_ );
+	}
+};
+
+class FECACCouplingTgl : public TglButton {
+private:
+	int                 channel_;
+public:
+
+	FECACCouplingTgl( Scope *scp, int channel, QWidget * parent = NULL )
+	: TglButton( scp, vector<QString>( {"AC", "DC" } ), parent ),
+	  channel_( channel )
+	{
+		setLbl( getVal() );
+	}
+
+	virtual void setVal(bool checked) override
+	{
+		scp_->fec()->setACMode( channel_, checked );
+	}
+
+	virtual bool getVal() override
+	{
+		return scp_->fec()->getACMode( channel_ );
+	}
+};
+
+class FECAttenuatorTgl : public TglButton {
+private:
+	int                 channel_;
+public:
+
+	FECAttenuatorTgl( Scope *scp, int channel, QWidget * parent = NULL )
+	: TglButton( scp, vector<QString>( {"-20dB", "0dB" } ), parent ),
+	  channel_( channel )
+	{
+		setLbl( getVal() );
+	}
+
+	virtual void setVal(bool checked) override
+	{
+		scp_->fec()->setAttenuator( channel_, checked );
+	}
+
+	virtual bool getVal() override
+	{
+		return scp_->fec()->getAttenuator( channel_ );
+	}
+};
+
+
+
 class TrigEdgMenu : public MenuButton {
 private:
 	Scope *scp_;
 
-	static std::vector<QString>
+	static vector<QString>
 	mkStrings(Scope *scp)
 	{
 		bool rising;
 		scp->acq()->getTriggerSrc( NULL, &rising );
-		std::vector<QString> rv;
+		vector<QString> rv;
 		if ( rising ) {
 			rv.push_back( "Rising"  );
 		} else {
@@ -261,12 +465,12 @@ class TrigAutMenu : public MenuButton {
 private:
 	Scope *scp_;
 
-	static std::vector<QString>
+	static vector<QString>
 	mkStrings(Scope *scp)
 	{
 		int ms = scp->acq()->getAutoTimeoutMS();
 
-		std::vector<QString> rv;
+		vector<QString> rv;
 		if ( ms >= 0 ) {
 			rv.push_back( "On"  );
 		} else {
@@ -299,10 +503,10 @@ class TrigArmMenu : public MenuButton {
 private:
 	Scope *scp_;
 
-	static std::vector<QString>
+	static vector<QString>
 	mkStrings(Scope *scp)
 	{
-		std::vector<QString> rv;
+		vector<QString> rv;
 		rv.push_back( "Continuous"  );
 		rv.push_back( "Off" );
 		rv.push_back( "Single"  );
@@ -527,17 +731,81 @@ public:
 	}
 };
 
+class LabeledSlider : public QSlider {
+protected:
+	Scope   *scp_;
+	QLabel  *lbl_;
+	QString  unit_;
+public:
+	LabeledSlider( Scope *scp, QLabel *lbl, const QString &unit, Qt::Orientation orient, QWidget *parent = NULL )
+	: QSlider( orient, parent ),
+	  scp_ ( scp  ),
+	  lbl_ ( lbl  ),
+	  unit_( unit )
+	{
+		QObject::connect( this, &QSlider::valueChanged, this, &LabeledSlider::update );
+	}
 
-Scope::Scope(FWPtr fw, bool sim)
-: fw_    ( fw  ),
+	void
+	update(int val)
+	{
+		updateVal( val );
+		lbl_->setText( QString::asprintf("%d", val) + unit_ );	
+	}
+
+	virtual void updateVal(int) = 0;
+};
+
+class AttenuatorSlider : public LabeledSlider {
+private:
+	int channel_;
+public:
+	AttenuatorSlider( Scope *scp, int channel, QLabel *lbl, Qt::Orientation orient, QWidget *parent = NULL )
+	: LabeledSlider( scp, lbl, "dB", orient, parent ),
+	  channel_( channel )
+	{
+		int  min, max;
+		scp_->pga()->getDBRange( &min, &max );
+		setMinimum( min );
+		setMaximum( max );
+		int att = roundf( scp_->pga()->getDBAtt( channel_ ) );
+		update( att );
+		setValue( att );
+	}
+
+	void
+	updateVal(int val) override
+	{
+		return scp_->pga()->setDBAtt( channel_, val );
+	}
+};
+
+Scope::Scope(FWPtr fw, bool sim, QObject *parent)
+: QObject( parent ),
+  fw_    ( fw  ),
   acq_   ( fw  ),
   adcClk_( ADCClk::create( fw ) ),
+  pga_   ( PGA::create( fw ) ),
+  leds_  ( LED::create( fw ) ),
+  fec_   ( FEC::create( fw ) ),
   sim_   ( sim )
 {
+
+	vChannelColors_.push_back( QColor( Qt::blue  ) );
+	vChannelColors_.push_back( QColor( Qt::black ) );
+
+	vChannelNames_.push_back( "A" );
+	vChannelNames_.push_back( "B" );
+
 	auto mainWid  = unique_ptr<QMainWindow>( new QMainWindow() );
 
 	auto menuBar  = unique_ptr<QMenuBar>( new QMenuBar() );
 	auto fileMen  = menuBar->addMenu( "File" );
+
+	auto act      = unique_ptr<QAction>( new QAction( "Quit" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quit );
+	fileMen->addAction( act.release() );
+
 	mainWid->setMenuBar( menuBar.release() );
 	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
 
@@ -567,14 +835,94 @@ Scope::Scope(FWPtr fw, bool sim)
 
 	formLay->addRow( new QLabel( "ADC Clock Freq."   ), new QLabel( QString::asprintf( "%10.3e", getADCClkFreq() ) ) );
 
+	formLay->addRow( new QLabel( "Attenuator:" ) );
+
+	for (int i = 0; i < vChannelColors_.size(); i++ ) {
+		auto p = mkGainControls( i, vChannelColors_[i] );
+		vOverRange_.push_back( p.second );
+		formLay->addRow( p.first.release() );
+	}
+
+	bool hasTitle = false;
+
+	for ( int ch = 0; ch < vChannelNames_.size(); ch++ ) {
+		vector< unique_ptr< QWidget > > v;
+		try {
+			v.push_back( unique_ptr< QWidget >( new FECTerminationTgl( this, ch ) ) ); 
+		} catch ( std::runtime_error & ) { printf("FEC Caught\n"); }
+		try {
+			v.push_back( unique_ptr< QWidget >( new FECACCouplingTgl( this, ch ) ) ); 
+		} catch ( std::runtime_error & ) {}
+		try {
+			v.push_back( unique_ptr< QWidget >( new FECAttenuatorTgl( this, ch ) ) ); 
+		} catch ( std::runtime_error & ) {}
+		if ( v.size() > 0 ) {
+			if ( ! hasTitle ) {
+				formLay->addRow( new QLabel( "Input Stage:" ) );
+				hasTitle = true;
+			}
+			auto hbx = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
+			for ( auto it  = v.begin(); it != v.end(); ++it ) {
+				hbx->addWidget( it->release() );
+			}
+			formLay->addRow( hbx.release() );
+		}
+	}
+
+	formLay->addRow( new QLabel( "Measurements:" ) );
+	for ( int ch = 0; ch < vChannelNames_.size(); ch++ ) {
+		auto lbl = unique_ptr<QLabel>( new QLabel() );
+		lbl->setStyleSheet( QString("color: %1; qproperty-alignment: AlignRight").arg( vChannelColors_[ch].name() ) );
+		vMeanLbls_.push_back( lbl.get() );
+		formLay->addRow( new QLabel( QString( "Mean %1" ).arg( *getChannelName(ch) ) ), lbl.release() );
+
+		lbl = unique_ptr<QLabel>( new QLabel() );
+		lbl->setStyleSheet( QString("color: %1; qproperty-alignment: AlignRight").arg( vChannelColors_[ch].name() ) );
+		vStdLbls_.push_back( lbl.get() );
+		formLay->addRow( new QLabel( QString( "SDev %1" ).arg( *getChannelName(ch) ) ), lbl.release() );
+	}
 
 	vertLay->addLayout( formLay.release() );
 	horzLay->addLayout( vertLay.release() );
+
+	QString msgTitle( "UsbScope Message" );
+	msgDialog_ = make_shared<MessageDialog>( mainWid.get(), &msgTitle );
 
 	auto centWid  = unique_ptr<QWidget>    ( new QWidget()     );
 	centWid->setLayout( horzLay.release() );
 	mainWid->setCentralWidget( centWid.release() );
 	mainWin_.swap( mainWid );
+}
+
+std::pair<unique_ptr<QHBoxLayout>, QWidget *>
+Scope::mkGainControls( int channel, QColor &color )
+{
+	auto lbl = unique_ptr<QLabel>          ( new QLabel()      );
+	auto sld = unique_ptr<AttenuatorSlider>( new AttenuatorSlider(this, channel, lbl.get(),  Qt::Horizontal ) );
+
+	sld->setTickPosition( QSlider::TicksBelow );
+	lbl->setStyleSheet( QString("color: ") + color.name() );
+
+	auto ovr = unique_ptr<QLabel>( new QLabel() );
+	ovr->setText   ( "Ovr" );
+	ovr->setVisible( false );
+
+	auto pol = ovr->sizePolicy();
+	pol.setRetainSizeWhenHidden( true );
+	ovr->setSizePolicy( pol );
+
+	auto hLay = unique_ptr<QHBoxLayout> ( new QHBoxLayout() );
+
+	auto rv   = std::pair<unique_ptr<QHBoxLayout>, QWidget *>();
+	rv.second = ovr.get();
+
+	hLay->addWidget( ovr.release() );
+	hLay->addWidget( sld.release() );
+	hLay->addWidget( lbl.release() );
+
+	rv.first  = std::move( hLay );
+	
+	return rv;
 }
 
 int
@@ -598,6 +946,8 @@ bool        sim  = false;
 	Scope sc( FWComm::create( fnam ), sim );
 
 	sc.show();
+
+	sc.message("Hola");
 
 	return app.exec();
 }
