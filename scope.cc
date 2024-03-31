@@ -166,6 +166,12 @@ public:
 		return leds_;
 	}
 
+	QwtPlotZoomer *
+	getZoom()
+	{
+		return zoom_;
+	}
+
 	unsigned
 	getNSamples()
 	{
@@ -248,6 +254,7 @@ public:
 
 };
 
+#if 0
 class TrigLevelMarker : public MovableMarker {
 public:
 	typedef double  LevelType;
@@ -277,67 +284,13 @@ public:
 	}
 	
 	void
-	setLevel(LevelType level)
-	{
-		if ( level < min_ || level > max_ ) {
-			throw std::runtime_error( "trigger level out of range (should have been validated)" );
-		}
-		acq_.setTriggerLevelPercent( level );
-		trgLvl_ = level;
-		updateMark();
-	}
-
-	double
-	getScale()
-	{
-		return zoom_->zoomBase().bottom();
-	}
-
-
-	void
-	updateMark()
-	{
-		auto scl = getScale();
-		setValue( 0.0, scl * trgLvl_/100.0 );
-	}
-
-	LevelType
-	getLevel()
-	{
-		return trgLvl_;
-	}
-
-	virtual void
-	update( const QPointF & point ) override
-	{
-		setValue( point.x(), point.y() );
-		trgLvl_ = 100.0*point.y() / getScale();
-		if ( wLbl_ ) {
-			wLbl_->setText( QString::asprintf( "%.0lf", trgLvl_ ) );
-		}
-	}
-
-	virtual void
-	updateDone() override
-	{
-		if ( trgLvl_ > max_ ) trgLvl_ = max_;
-		if ( trgLvl_ < min_ ) trgLvl_ = min_;
-		acq_.setTriggerLevelPercent( trgLvl_ );
-	}
-
-	void
 	attachLbl( QLabel *lbl )
 	{
 		wLbl_ = lbl;
 	}
 
-	void
-	attach( QwtPlot *plot )
-	{
-		MovableMarker::attach( plot );
-		updateMark();
-	}
 };
+#endif
 
 class TxtAction;
 
@@ -782,13 +735,18 @@ public:
 
 };
 
-class TrigLevel : public ParamValidator {
+class TrigLevel : public ParamValidator, public MovableMarker {
 private:
-	Scope *scp_;
+	Scope         *scp_;
+	mutable double lvl_;
+	bool           updating_;
+	
 public:
 	TrigLevel( QLineEdit *edt, Scope *scp )
 	: ParamValidator( edt, new QDoubleValidator(-100.0,100.0, 1) ),
-      scp_( scp )
+	  MovableMarker(       ),
+      scp_         ( scp   ),
+	  updating_    ( false )
 	{
 		getAction();
 	}
@@ -796,23 +754,66 @@ public:
 	virtual double
 	getVal() const
 	{
-		return scp_->acq()->getTriggerLevelPercent();
+		return (lvl_ = scp_->acq()->getTriggerLevelPercent() );
 	}
 
 	virtual void
 	setVal(double v)
 	{
+		lvl_ = v;
 		scp_->acq()->setTriggerLevelPercent( v );
+		updateMark();
+	}
+
+	virtual void
+	update( const QPointF & point ) override
+	{
+		setValue( point.x(), point.y() );
+		lvl_ = 100.0*point.y() / getScale();
+		updating_ = true;
+		getAction();
+	}
+
+	virtual void
+	updateDone() override
+	{
+		scp_->acq()->setTriggerLevelPercent( lvl_ );
+		updating_ = false;
+		getAction();
 	}
 
 	virtual void get(QString &s) const override
 	{
-		s = QString::asprintf("%.0f", getVal());
+		if ( updating_ ) {
+			s = QString::asprintf( "%.0lf", lvl_ );
+		} else {
+			s = QString::asprintf("%.0f", getVal());
+		}
 	}
 
 	virtual void set(const QString &s) override
 	{
 		setVal( s.toDouble() );
+	}
+
+	virtual double
+	getScale()
+	{
+		return scp_->getZoom()->zoomBase().bottom();
+	}
+
+	virtual void
+	updateMark()
+	{
+		auto scl = getScale();
+		setValue( 0.0, scl * lvl_/100.0 );
+	}
+
+	virtual void
+	attach( QwtPlot *plot )
+	{
+		MovableMarker::attach( plot );
+		updateMark();
 	}
 };
 
@@ -1086,20 +1087,12 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	// markers
 	vector<MovableMarker*> vMarkers;
 
-	auto lvlMrk  = new TrigLevelMarker( fw_, zoom_ );
-	lvlMrk->attach( plot_ );
-	lvlMrk->setLineStyle( QwtPlotMarker::HLine );
-	vMarkers.push_back( lvlMrk );
-
 	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
 	horzLay->addWidget( plot.release(), 8 );
-
-	new MovableMarkers( plot_, picker_, vMarkers, plot_ );
 
 	auto formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
 	auto editWid  = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	auto trigLvl  = new TrigLevel( editWid.get(), this );
-	lvlMrk->attachLbl( editWid.get() );
 	formLay->addRow( new QLabel( "Trigger Level [%]" ), editWid.release() );
 
 	formLay->addRow( new QLabel( "Trigger Source"    ), new TrigSrcMenu( this ) );
@@ -1162,15 +1155,21 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 		auto lbl = unique_ptr<QLabel>( new QLabel() );
 		lbl->setStyleSheet( QString("color: %1; qproperty-alignment: AlignRight").arg( vChannelColors_[ch].name() ) );
 		vMeanLbls_.push_back( lbl.get() );
-		formLay->addRow( new QLabel( QString( "Mean %1" ).arg( *getChannelName(ch) ) ), lbl.release() );
+		formLay->addRow( new QLabel( QString( "Avg %1" ).arg( *getChannelName(ch) ) ), lbl.release() );
 
 		lbl = unique_ptr<QLabel>( new QLabel() );
 		lbl->setStyleSheet( QString("color: %1; qproperty-alignment: AlignRight").arg( vChannelColors_[ch].name() ) );
 		vStdLbls_.push_back( lbl.get() );
-		formLay->addRow( new QLabel( QString( "SDev %1" ).arg( *getChannelName(ch) ) ), lbl.release() );
+		formLay->addRow( new QLabel( QString( "RMS %1" ).arg( *getChannelName(ch) ) ), lbl.release() );
 	}
 
 	auto vertLay  = unique_ptr<QVBoxLayout>( new QVBoxLayout() );
+
+	trigLvl->setLineStyle( QwtPlotMarker::HLine );
+	trigLvl->attach( plot_ );
+	vMarkers.push_back( trigLvl );
+
+	new MovableMarkers( plot_, picker_, vMarkers, plot_ );
 
 	vertLay->addLayout( formLay.release() );
 	horzLay->addLayout( vertLay.release() );
@@ -1271,7 +1270,9 @@ Scope::newData(BufPtr buf)
 	}
 
 	for ( int ch = 0; ch < vPltCurv_.size(); ch++ ) {
-		vPltCurv_[ch]->setRawSamples( xRange_, buf->getData( ch ), buf->getNElms() );
+		vPltCurv_ [ch]->setRawSamples( xRange_, buf->getData( ch ), buf->getNElms() );
+		vMeanLbls_[ch]->setText( QString::asprintf("%7.2f", buf->getAvg(ch) ) );
+		vStdLbls_ [ch]->setText( QString::asprintf("%7.2f", buf->getStd(ch) ) );
 	}
 	lsync_ = buf->getSync();
 

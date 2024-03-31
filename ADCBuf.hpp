@@ -114,7 +114,7 @@ public:
 	double
 	getAvg(unsigned ch)
 	{
-		if ( ch < NCH ) {
+		if ( ch >= NCH ) {
 			throw std::invalid_argument( __func__ );
 		}
 		if ( ! mVld_[ch] ) {
@@ -126,7 +126,7 @@ public:
 	double
 	getStd(unsigned ch)
 	{
-		if ( ch < NCH ) {
+		if ( ch >= NCH ) {
 			throw std::invalid_argument( __func__ );
 		}
 		if ( ! mVld_[ch] ) {

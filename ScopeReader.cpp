@@ -95,6 +95,7 @@ ScopeReader::run()
 			unsigned nelms = got / bytesPerSmpl_;
 			for ( int ch = 0; ch < bufPool_->NumChannels; ch++ ) {
 				readBuf_->copyCh( buf, ch, nelms );
+				buf->measure( ch );
 			}
 			buf->initHdr( hdr, cmd.npts_, cmd.sync_, cmd.scal_, nelms );
 			postMbox( &buf );
