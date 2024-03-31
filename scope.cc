@@ -37,12 +37,15 @@
 
 #include <qwt_plot.h>
 #include <qwt_plot_zoomer.h>
+#include <qwt_plot_picker.h>
+#include <qwt_picker_machine.h>
 #include <qwt_plot_curve.h>
 #include <qwt_scale_draw.h>
 
 #include <DataReadyEvent.hpp>
 #include <ScopeReader.hpp>
 #include <Scope.hpp>
+#include <MovableMarkers.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
@@ -114,6 +117,7 @@ private:
 	TrigArmMenu                          *trgArm_;
 	bool                                  single_;
 	unsigned                              lsync_;
+	QwtPlotPicker                        *picker_;
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
@@ -242,6 +246,97 @@ public:
 		msgDialog_->exec();
 	}
 
+};
+
+class TrigLevelMarker : public MovableMarker {
+public:
+	typedef double  LevelType;
+private:
+	AcqCtrl         acq_;
+	QwtPlotZoomer  *zoom_;
+	QLabel         *wLbl_;
+	LevelType       trgLvl_;
+	LevelType       min_;
+	LevelType       max_;
+
+	TrigLevelMarker( const TrigLevelMarker & ) = delete;
+	TrigLevelMarker &
+	operator=      ( const TrigLevelMarker & ) = delete;
+public:
+	TrigLevelMarker(
+		FWPtr          fwp,
+		QwtPlotZoomer *zoom
+	)
+	: acq_         ( fwp    ),
+	  zoom_        ( zoom   ),
+	  wLbl_        ( NULL   ),
+	  trgLvl_      ( acq_.getTriggerLevelPercent() ),
+	  min_         ( -100   ),
+	  max_         ( +100   )
+	{
+	}
+	
+	void
+	setLevel(LevelType level)
+	{
+		if ( level < min_ || level > max_ ) {
+			throw std::runtime_error( "trigger level out of range (should have been validated)" );
+		}
+		acq_.setTriggerLevelPercent( level );
+		trgLvl_ = level;
+		updateMark();
+	}
+
+	double
+	getScale()
+	{
+		return zoom_->zoomBase().bottom();
+	}
+
+
+	void
+	updateMark()
+	{
+		auto scl = getScale();
+		setValue( 0.0, scl * trgLvl_/100.0 );
+	}
+
+	LevelType
+	getLevel()
+	{
+		return trgLvl_;
+	}
+
+	virtual void
+	update( const QPointF & point ) override
+	{
+		setValue( point.x(), point.y() );
+		trgLvl_ = 100.0*point.y() / getScale();
+		if ( wLbl_ ) {
+			wLbl_->setText( QString::asprintf( "%.0lf", trgLvl_ ) );
+		}
+	}
+
+	virtual void
+	updateDone() override
+	{
+		if ( trgLvl_ > max_ ) trgLvl_ = max_;
+		if ( trgLvl_ < min_ ) trgLvl_ = min_;
+		acq_.setTriggerLevelPercent( trgLvl_ );
+	}
+
+	void
+	attachLbl( QLabel *lbl )
+	{
+		wLbl_ = lbl;
+	}
+
+	void
+	attach( QwtPlot *plot )
+	{
+		MovableMarker::attach( plot );
+		updateMark();
+	}
 };
 
 class TxtAction;
@@ -914,7 +1009,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
   yScale_( acq_.getBufSampleSize() > 1 ? 32767.0 : 127.0 ),
   trgArm_( NULL     ),
   single_( false    ),
-  lsync_ ( 0        )
+  lsync_ ( 0        ),
+  picker_( NULL     )
 {
 	if ( 0 == nsmpl_ || nsmpl_ > acq_.getMaxNSamples() ) {
 		nsmpl_ = acq_.getMaxNSamples();
@@ -948,6 +1044,9 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto plot     = unique_ptr<QwtPlot>( new QwtPlot() );
 	plot_         = plot.get();
 	plot->setAutoReplot( true );
+
+    picker_       = new QwtPlotPicker( plot_->xBottom, plot_->yLeft, plot_->canvas() );
+	picker_->setStateMachine( new QwtPickerDragPointMachine() );
 
 	zoom_         = new QwtPlotZoomer( plot_->canvas() );
 	zoom_->setKeyPattern( QwtEventPattern::KeyRedo, Qt::Key_I );
@@ -984,12 +1083,23 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 		vPltCurv_.push_back( curv.release() );
 	}
 
+	// markers
+	vector<MovableMarker*> vMarkers;
+
+	auto lvlMrk  = new TrigLevelMarker( fw_, zoom_ );
+	lvlMrk->attach( plot_ );
+	lvlMrk->setLineStyle( QwtPlotMarker::HLine );
+	vMarkers.push_back( lvlMrk );
+
 	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
 	horzLay->addWidget( plot.release(), 8 );
+
+	new MovableMarkers( plot_, picker_, vMarkers, plot_ );
 
 	auto formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
 	auto editWid  = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	auto trigLvl  = new TrigLevel( editWid.get(), this );
+	lvlMrk->attachLbl( editWid.get() );
 	formLay->addRow( new QLabel( "Trigger Level [%]" ), editWid.release() );
 
 	formLay->addRow( new QLabel( "Trigger Source"    ), new TrigSrcMenu( this ) );
@@ -1080,6 +1190,9 @@ Scope::~Scope()
 {
 	if ( xRange_ ) {
 		delete [] xRange_;
+	}
+	if ( picker_ ) {
+		delete picker_;
 	}
 }
 
