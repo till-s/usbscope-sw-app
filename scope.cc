@@ -13,6 +13,13 @@
 #include <QPushButton>
 #include <QDialog>
 #include <QDialogButtonBox>
+
+#include <QState>
+#include <QStateMachine>
+#include <QFinalState>
+#include <QFuture>
+#include <QFutureWatcher>
+
 #include <memory>
 #include <stdio.h>
 #include <getopt.h>
@@ -23,14 +30,25 @@
 #include <FEC.hpp>
 #include <LED.hpp>
 #include <vector>
+#include <string>
 #include <utility>
 #include <math.h>
 #include <stdlib.h>
+
+#include <qwt_plot.h>
+#include <qwt_plot_zoomer.h>
+#include <qwt_plot_curve.h>
+#include <qwt_scale_draw.h>
+
+#include <DataReadyEvent.hpp>
+#include <ScopeReader.hpp>
+#include <Scope.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 using std::vector;
+using std::string;
 
 class MessageDialog : public QDialog {
 	QLabel *lbl_;
@@ -60,6 +78,8 @@ public:
 	
 };
 
+class ScaleXfrm;
+class TrigArmMenu;
 
 class Scope : public QObject {
 private:
@@ -77,13 +97,32 @@ private:
 	vector<QString>                       vChannelNames_;
 	vector<QLabel*>                       vMeanLbls_;
 	vector<QLabel*>                       vStdLbls_;
+	vector<QwtPlotCurve*>                 vPltCurv_;
 	shared_ptr<MessageDialog>             msgDialog_;
+	QwtPlot                              *plot_;
+	QwtPlotZoomer                        *zoom_;
+	ScaleXfrm                            *axisSclLeft_;
+	ScaleXfrm                            *axisSclBotm_;
+	ScopeReader                          *reader_;
+	BufPtr                                curBuf_;
+	// qwt 6.1 does not have setRawSamples(float*,int) :-(
+	double                               *xRange_;
+	unsigned                              nsmpl_;
+	ScopeReaderCmdPipePtr                 pipe_;
+	ScopeReaderCmd                        cmd_;
+	double                                yScale_;
+	TrigArmMenu                          *trgArm_;
+	bool                                  single_;
+	unsigned                              lsync_;
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
 
 public:
-	Scope(FWPtr fw, bool sim=false, QObject *parent = NULL);
+	Scope(FWPtr fw, bool sim=false, unsigned nsamples = 0, QObject *parent = NULL);
+	~Scope();
+
+	void startReader(unsigned poolDepth = 4);
 
 	const QString *
 	getChannelName(int channel)
@@ -124,10 +163,9 @@ public:
 	}
 
 	unsigned
-	getBufSize()
+	getNSamples()
 	{
-		printf("FIXME\n");
-		return 1024;
+		return acq_.getNSamples();
 	}
 
 	double
@@ -151,27 +189,38 @@ public:
 	unsigned
 	getDecimation()
 	{
-		return decimation_;
+		return cmd_.decm_;
 	}
 
 	void
 	setDecimation(unsigned d)
 	{
-		decimation_ = d;
+		cmd_.decm_ = d;
 		acq_.setDecimation( d );
-		printf("FIXME -- TODO\n");
+		postSync();
 	}
 
 	void
 	postTrgMode(const QString &mode)
 	{
-		printf("FIME -- TODO\n");
+		if ( mode == "Single" ) {
+			// increment the sync value
+			postSync();
+		}
+	}
+
+	void
+	postSync()
+	{
+		cmd_.sync_++;
+		pipe_->sendCmd( &cmd_ );
 	}
 
 	void
 	updateNPreTriggerSamples(unsigned npts)
 	{
-		printf("FIME -- TODO\n");
+		cmd_.npts_ = npts;
+		postSync();
 	}
 
 	void
@@ -179,6 +228,12 @@ public:
 	{
 		exit(0);
 	}
+
+	virtual bool
+	event(QEvent *ev) override;
+
+	void
+	newData( BufPtr buf );
 
 	void
 	message( const QString &s )
@@ -502,6 +557,7 @@ public:
 class TrigArmMenu : public MenuButton {
 private:
 	Scope *scp_;
+    bool   single_;
 
 	static vector<QString>
 	mkStrings(Scope *scp)
@@ -523,10 +579,17 @@ public:
 		scp_->postTrgMode( text() );
 	}
 
+	virtual bool
+	single()
+	{
+		return single_;
+	}
+
 	virtual void
 	visit(TxtAction *act) override
 	{
 		MenuButton::visit( act );
+		single_ = (text() == "Single");
 		scp_->clrTrgLED();
 		scp_->postTrgMode( act->text() );
 
@@ -613,7 +676,6 @@ public:
 
 	void set(const QString &s) override
 	{
-		printf("Setting %s\n", s.toStdString().c_str());
 		bool ok;
 		unsigned  v = s.toUInt( &ok );
 		if ( ! ok ) {
@@ -679,18 +741,17 @@ public:
 
 	virtual void set(const QString &s) override
 	{
-		unsigned npts = s.toUInt();
-		setVal( npts );
-		scp_->updateNPreTriggerSamples( npts );
+		unsigned n = s.toUInt();
+		setVal( n );
 	}
 };
 
 class NPreTriggerSamples : public IntParamValidator {
 public:
 	NPreTriggerSamples( QLineEdit *edt, Scope *scp )
-	: IntParamValidator( edt, scp, 0, scp->getBufSize() - 1 )
+	: IntParamValidator( edt, scp, 0, scp->getNSamples() - 1 )
 	{
-		if ( getVal() >= scp->getBufSize() ) {
+		if ( getVal() >= scp->getNSamples() ) {
 			setVal( 0 );
 		}
 		getAction();
@@ -706,6 +767,7 @@ public:
 	setVal(int n) override
 	{
 		scp_->acq()->setNPreTriggerSamples( n );
+		scp_->updateNPreTriggerSamples( n );
 	}
 
 };
@@ -780,16 +842,91 @@ public:
 	}
 };
 
-Scope::Scope(FWPtr fw, bool sim, QObject *parent)
-: QObject( parent ),
-  fw_    ( fw  ),
-  acq_   ( fw  ),
+class ScaleXfrm : public QObject, public QwtScaleDraw {
+	double              scl_;
+	double              off_;
+	QwtPlotZoomer      *zoom_;
+	QRectF              rect_;
+public:
+	ScaleXfrm(QwtPlotZoomer *zoom, QObject *parent = NULL)
+	: QObject ( parent ),
+	  QwtScaleDraw(),
+	  scl_    ( 1.0  ),
+	  off_    ( 0.0  ),
+	  zoom_   ( zoom ),
+	  rect_   ( zoom->zoomRect() )
+	{
+	}
+
+	virtual double
+	offset()
+	{
+		return off_;
+	}
+
+	virtual double
+	scale()
+	{
+		return scl_;
+	}
+
+	virtual void
+	setOffset(double off)
+	{
+		off_ = off;
+	}
+
+	virtual void
+	setScale(double scl)
+	{
+		scl_ = scl;
+	}
+	
+	virtual QwtText
+	label(double val) const override
+	{
+		QRectF r = zoom_->zoomRect();
+		printf( "l->r %f -> %f\n", r.left(), r.right() );
+		return QwtScaleDraw::label( val * scl_ + off_ );
+	}
+
+	void
+	setRect(const QRectF &r)
+	{
+		rect_ = r;
+		printf( "setRect: l->r %f -> %f\n", r.left(), r.right() );
+	}
+};
+
+Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
+: QObject( parent   ),
+  fw_    ( fw       ),
+  acq_   ( fw       ),
   adcClk_( ADCClk::create( fw ) ),
   pga_   ( PGA::create( fw ) ),
   leds_  ( LED::create( fw ) ),
   fec_   ( FEC::create( fw ) ),
-  sim_   ( sim )
+  sim_   ( sim      ),
+  reader_( NULL     ),
+  xRange_( NULL     ),
+  nsmpl_ ( nsamples ),
+  pipe_  ( ScopeReaderCmdPipe::create() ),
+  yScale_( acq_.getBufSampleSize() > 1 ? 32767.0 : 127.0 ),
+  trgArm_( NULL     ),
+  single_( false    ),
+  lsync_ ( 0        )
 {
+	if ( 0 == nsmpl_ || nsmpl_ > acq_.getMaxNSamples() ) {
+		nsmpl_ = acq_.getMaxNSamples();
+	}
+
+	acq_.setNSamples( nsmpl_ );
+
+	auto xRange = unique_ptr<double[]>( new double[ nsmpl_ ] );
+	xRange_ = xRange.get();
+	for ( int i = 0; i < nsmpl_; i++ ) {
+		xRange_[i] = (double)i;
+	}
 
 	vChannelColors_.push_back( QColor( Qt::blue  ) );
 	vChannelColors_.push_back( QColor( Qt::black ) );
@@ -807,9 +944,48 @@ Scope::Scope(FWPtr fw, bool sim, QObject *parent)
 	fileMen->addAction( act.release() );
 
 	mainWid->setMenuBar( menuBar.release() );
-	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
 
-    auto vertLay  = unique_ptr<QVBoxLayout>( new QVBoxLayout() );
+	auto plot     = unique_ptr<QwtPlot>( new QwtPlot() );
+	plot_         = plot.get();
+	plot->setAutoReplot( true );
+
+	zoom_         = new QwtPlotZoomer( plot_->canvas() );
+	zoom_->setKeyPattern( QwtEventPattern::KeyRedo, Qt::Key_I );
+	zoom_->setKeyPattern( QwtEventPattern::KeyUndo, Qt::Key_O );
+	zoom_->setMousePattern( QwtEventPattern::MouseSelect1, Qt::LeftButton,   Qt::ShiftModifier );
+	zoom_->setMousePattern( QwtEventPattern::MouseSelect2, Qt::MiddleButton, Qt::ShiftModifier );
+	zoom_->setMousePattern( QwtEventPattern::MouseSelect3, Qt::RightButton,  Qt::ShiftModifier );
+	
+	auto sclDrw   = unique_ptr<ScaleXfrm>( new ScaleXfrm( zoom_ ) );
+	axisSclLeft_  = sclDrw.get();
+	plot_->setAxisScaleDraw( QwtPlot::yLeft, sclDrw.get() );
+	sclDrw->setParent( plot_ );
+	sclDrw.release();
+	plot_->setAxisScale( QwtPlot::yLeft, -yScale_ - 1, yScale_ );
+
+	QObject::connect( zoom_, &QwtPlotZoomer::zoomed, axisSclLeft_, &ScaleXfrm::setRect );
+	// connect to 'selected'; zoomed is emitted *after* the labels are painted
+	QObject::connect( zoom_, qOverload<const QRectF&>(&QwtPlotPicker::selected), axisSclLeft_, &ScaleXfrm::setRect );
+
+	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( zoom_ ) );
+	axisSclBotm_  = sclDrw.get();
+	plot_->setAxisScaleDraw( QwtPlot::xBottom, sclDrw.get() );
+	sclDrw->setParent( plot_ );
+	sclDrw.release();
+	plot_->setAxisScale( QwtPlot::xBottom, 0, nsmpl_ - 1  );
+
+	// necessary after changing the axis scale
+	zoom_->setZoomBase();
+
+	for (int i = 0; i < vChannelColors_.size(); i++ ) {
+		auto curv = unique_ptr<QwtPlotCurve>( new QwtPlotCurve() );
+		curv->setPen( vChannelColors_[i] );
+		curv->attach( plot_ );
+		vPltCurv_.push_back( curv.release() );
+	}
+
+	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
+	horzLay->addWidget( plot.release(), 8 );
 
 	auto formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
 	auto editWid  = unique_ptr<QLineEdit>  ( new QLineEdit()   );
@@ -819,15 +995,17 @@ Scope::Scope(FWPtr fw, bool sim, QObject *parent)
 	formLay->addRow( new QLabel( "Trigger Source"    ), new TrigSrcMenu( this ) );
 	formLay->addRow( new QLabel( "Trigger Edge"      ), new TrigEdgMenu( this ) );
 	formLay->addRow( new QLabel( "Trigger Auto"      ), new TrigAutMenu( this ) );
-	formLay->addRow( new QLabel( "Trigger Arm"       ), new TrigArmMenu( this  ) );
+    trgArm_ = new TrigArmMenu( this );
+	formLay->addRow( new QLabel( "Trigger Arm"       ), trgArm_ );
 
 	editWid       = unique_ptr<QLineEdit>  ( new QLineEdit()   );
-	new NPreTriggerSamples( editWid.get(), this );
+	auto npts     = new NPreTriggerSamples( editWid.get(), this );
+	cmd_.npts_    = npts->getVal();
 	formLay->addRow( new QLabel( "Trigger Sample #"  ), editWid.release() );
 
 	unsigned cic0, cic1;
 	acq_.getDecimation( &cic0, &cic1 );
-	decimation_ = cic0*cic1;
+	cmd_.decm_    = cic0*cic1;
 
 	editWid       = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	new Decimation( editWid.get(), this );
@@ -882,6 +1060,8 @@ Scope::Scope(FWPtr fw, bool sim, QObject *parent)
 		formLay->addRow( new QLabel( QString( "SDev %1" ).arg( *getChannelName(ch) ) ), lbl.release() );
 	}
 
+	auto vertLay  = unique_ptr<QVBoxLayout>( new QVBoxLayout() );
+
 	vertLay->addLayout( formLay.release() );
 	horzLay->addLayout( vertLay.release() );
 
@@ -892,6 +1072,26 @@ Scope::Scope(FWPtr fw, bool sim, QObject *parent)
 	centWid->setLayout( horzLay.release() );
 	mainWid->setCentralWidget( centWid.release() );
 	mainWin_.swap( mainWid );
+
+	xRange.release();
+}
+
+Scope::~Scope()
+{
+	if ( xRange_ ) {
+		delete [] xRange_;
+	}
+}
+
+bool
+Scope::event(QEvent *event)
+{
+	if ( event->type() == DataReadyEvent::TYPE() ) {
+		newData( reader_->getMbox() );
+		return true;
+	}
+	return QObject::event( event );
+
 }
 
 std::pair<unique_ptr<QHBoxLayout>, QWidget *>
@@ -925,6 +1125,58 @@ Scope::mkGainControls( int channel, QColor &color )
 	return rv;
 }
 
+class QSM : public QObject {
+public:
+	void foo ()
+	{
+		printf("Started\n");
+	}
+
+	void bar(const QString &)
+	{
+		printf("BAR\n");
+	}
+};
+
+void
+Scope::newData(BufPtr buf)
+{
+	if ( ! buf ) {
+		return;
+	}
+
+	if ( buf->getSync() != cmd_.sync_ ) {
+		// if we incremented the 'sync' counter then toss everything until
+		// we get fresh data
+		lsync_ = buf->getSync(); // still record the last sync value
+		return;
+	}
+
+	if ( trgArm_->single() && ( buf->getSync() != lsync_ ) ) {
+		// single-trigger event received
+		trgArm_->setText( "Off" );
+	}
+
+	for ( int ch = 0; ch < vPltCurv_.size(); ch++ ) {
+		vPltCurv_[ch]->setRawSamples( xRange_, buf->getData( ch ), buf->getNElms() );
+	}
+	lsync_ = buf->getSync();
+
+	curBuf_.swap(buf);
+}
+
+void
+Scope::startReader(unsigned poolDepth)
+{
+	if ( reader_ ) {
+		throw std::runtime_error( string(__func__) + " reader already started" );
+	}
+	BufPoolPtr bufPool = make_shared<BufPoolPtr::element_type>( nsmpl_ );
+	bufPool->add( poolDepth );
+	reader_ = new ScopeReader( fw_, bufPool, pipe_, this );
+	reader_->start();
+}
+
 int
 main(int argc, char **argv)
 {
@@ -943,11 +1195,50 @@ bool        sim  = false;
 				return 1;
 		}
 	}
-	Scope sc( FWComm::create( fnam ), sim );
+
+	QSM *qsm = new QSM();
+
+#if 0
+	QFuture<void> fut;
+	QFuture<void> fut1;
+	QFutureWatcher<void> w;
+	QObject::connect( &w , &QFutureWatcher<void>::finished, qsm, &QSM::foo );
+
+	w.setFuture( fut );
+	w.setFuture( fut1 );
+#endif
+#if 0
+	QObject::connect( qsm , &QObject::objectNameChanged, qsm, &QSM::bar );
+
+	qsm->setObjectName( "xx" );
+	qsm->setObjectName( "" );
+#endif
+#if 0
+    QFinalState *s1 = new QFinalState();
+    QState *s0 = new QState();
+    QState *s2 = new QState(QState::ExclusiveStates, s0);
+    QState *s3 = new QState(QState::ExclusiveStates, s0);
+	QStateMachine *m = new QStateMachine();
+
+	QObject::connect( s0, &QState::initialStateChanged, qsm, &QSM::foo );
+
+	s0->setInitialState(s2);
+	s0->setInitialState(s3);
+#endif
+#if 0
+	m->addState( s1 );
+	m->setInitialState( s1 );
+	m->start();
+	printf("running: %d\n", m->isRunning());
+#endif
+#if 1
+	Scope sc( FWComm::create( fnam ), 0, sim );
+
+	sc.startReader();
 
 	sc.show();
-
-	sc.message("Hola");
+#endif
+	printf("pre-exec\n");
 
 	return app.exec();
 }
