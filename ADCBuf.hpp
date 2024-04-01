@@ -64,6 +64,12 @@ public:
 	}
 
 	unsigned
+	getHdr()
+	{
+		return hdr_;
+	}
+
+	unsigned
 	getNumChannels()
 	{
 		return NCH;

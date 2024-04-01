@@ -24,11 +24,7 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <FWComm.hpp>
-#include <AcqCtrl.hpp>
-#include <ADCClk.hpp>
-#include <PGA.hpp>
-#include <FEC.hpp>
-#include <LED.hpp>
+#include <Board.hpp>
 #include <vector>
 #include <string>
 #include <utility>
@@ -84,20 +80,15 @@ public:
 class ScaleXfrm;
 class TrigArmMenu;
 
-class Scope : public QObject {
+class Scope : public QObject, public Board {
 private:
-	FWPtr                                 fw_;
 	unique_ptr<QMainWindow>               mainWin_;
-	AcqCtrl                               acq_;
-	ADCClkPtr                             adcClk_;
-	PGAPtr                                pga_;
-	LEDPtr                                leds_;
-	FECPtr                                fec_;
 	unsigned                              decimation_;
 	bool                                  sim_;
 	vector<QWidget*>                      vOverRange_;
 	vector<QColor>                        vChannelColors_;
 	vector<QString>                       vChannelNames_;
+	vector<string>                        vOvrLEDNames_;
 	vector<QLabel*>                       vMeanLbls_;
 	vector<QLabel*>                       vStdLbls_;
 	vector<QwtPlotCurve*>                 vPltCurv_;
@@ -105,6 +96,7 @@ private:
 	QwtPlot                              *plot_;
 	QwtPlotZoomer                        *zoom_;
 	ScaleXfrm                            *axisSclLeft_;
+	ScaleXfrm                            *axisSclRight_;
 	ScaleXfrm                            *axisSclBotm_;
 	ScopeReader                          *reader_;
 	BufPtr                                curBuf_;
@@ -113,7 +105,7 @@ private:
 	unsigned                              nsmpl_;
 	ScopeReaderCmdPipePtr                 pipe_;
 	ScopeReaderCmd                        cmd_;
-	double                                yScale_;
+	vector<double>                        vYScale_;
 	TrigArmMenu                          *trgArm_;
 	bool                                  single_;
 	unsigned                              lsync_;
@@ -193,7 +185,18 @@ public:
 	void
 	clrTrgLED()
 	{
-		printf("FIXME -- TODO\n");
+		leds_->setVal( "Trig", 0 );
+		clrOvrLED();
+	}
+
+	void
+	clrOvrLED()
+	{
+		auto it = vOvrLEDNames_.begin();
+		while ( it != vOvrLEDNames_.end() ) {
+			leds_->setVal( *it, 0 );
+			++it;
+		}
 	}
 
 	unsigned
@@ -227,11 +230,7 @@ public:
 	}
 
 	void
-	updateNPreTriggerSamples(unsigned npts)
-	{
-		cmd_.npts_ = npts;
-		postSync();
-	}
+	updateNPreTriggerSamples(unsigned npts);
 
 	void
 	quit()
@@ -939,16 +938,20 @@ public:
 };
 
 class ScaleXfrm : public QObject, public QwtScaleDraw {
+	double              rscl_;
+	double              roff_;
 	double              scl_;
 	double              off_;
 	QwtPlotZoomer      *zoom_;
 	QRectF              rect_;
 public:
-	ScaleXfrm(QwtPlotZoomer *zoom, QObject *parent = NULL)
+	ScaleXfrm(QwtPlotZoomer *zoom, double rscl, double roff = 0.0, QObject *parent = NULL)
 	: QObject ( parent ),
 	  QwtScaleDraw(),
-	  scl_    ( 1.0  ),
-	  off_    ( 0.0  ),
+	  rscl_   ( rscl ),
+	  roff_   ( roff ),
+	  scl_    ( rscl ),
+	  off_    ( roff ),
 	  zoom_   ( zoom ),
 	  rect_   ( zoom->zoomRect() )
 	{
@@ -961,29 +964,75 @@ public:
 	}
 
 	virtual double
+	rawOffset()
+	{
+		return roff_;
+	}
+
+
+	virtual double
 	scale()
 	{
 		return scl_;
 	}
 
+	virtual double
+	rawScale()
+	{
+		return rscl_;
+	}
+
+	
 	virtual void
 	setOffset(double off)
 	{
 		off_ = off;
+		updatePlot();
 	}
+
+	virtual void
+	setRawOffset(double off)
+	{
+		roff_ = off;
+		updatePlot();
+	}
+
 
 	virtual void
 	setScale(double scl)
 	{
 		scl_ = scl;
+		updatePlot();
 	}
-	
+
+	virtual void
+	setRawScale(double scl)
+	{
+		rscl_ = scl;
+		updatePlot();
+	}
+
+	virtual void
+	updatePlot()
+	{
+		// does not work
+		// zoom_->plot()->updateAxes();
+
+		// does not work either
+		//zoom_->plot()->replot();
+
+		// but this does:
+		// https://www.qtcentre.org/threads/64212-Can-an-Axis-Labels-be-Redrawn
+		invalidateCache();
+	}
+		
 	virtual QwtText
 	label(double val) const override
 	{
 		QRectF r = zoom_->zoomRect();
 		printf( "l->r %f -> %f\n", r.left(), r.right() );
-		return QwtScaleDraw::label( val * scl_ + off_ );
+		double nval = (val - roff_)/rscl_ * scl_ + off_;
+		return QwtScaleDraw::label( nval );
 	}
 
 	void
@@ -996,18 +1045,12 @@ public:
 
 Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 : QObject( parent   ),
-  fw_    ( fw       ),
-  acq_   ( fw       ),
-  adcClk_( ADCClk::create( fw ) ),
-  pga_   ( PGA::create( fw ) ),
-  leds_  ( LED::create( fw ) ),
-  fec_   ( FEC::create( fw ) ),
+  Board  ( fw       ),
   sim_   ( sim      ),
   reader_( NULL     ),
   xRange_( NULL     ),
   nsmpl_ ( nsamples ),
   pipe_  ( ScopeReaderCmdPipe::create() ),
-  yScale_( acq_.getBufSampleSize() > 1 ? 32767.0 : 127.0 ),
   trgArm_( NULL     ),
   single_( false    ),
   lsync_ ( 0        ),
@@ -1030,6 +1073,13 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	vChannelNames_.push_back( "A" );
 	vChannelNames_.push_back( "B" );
+
+	auto it = vChannelNames_.begin();
+	while ( it != vChannelNames_.end() ) {
+		vOvrLEDNames_.push_back( string("OVR") + it->toStdString() );
+		vYScale_.push_back( acq_.getBufSampleSize() > 1 ? 32767.0 : 127.0 );
+		++it;
+	}
 
 	auto mainWid  = unique_ptr<QMainWindow>( new QMainWindow() );
 
@@ -1056,23 +1106,34 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	zoom_->setMousePattern( QwtEventPattern::MouseSelect2, Qt::MiddleButton, Qt::ShiftModifier );
 	zoom_->setMousePattern( QwtEventPattern::MouseSelect3, Qt::RightButton,  Qt::ShiftModifier );
 	
-	auto sclDrw   = unique_ptr<ScaleXfrm>( new ScaleXfrm( zoom_ ) );
+	auto sclDrw   = unique_ptr<ScaleXfrm>( new ScaleXfrm( zoom_, vYScale_[0] ) );
 	axisSclLeft_  = sclDrw.get();
 	plot_->setAxisScaleDraw( QwtPlot::yLeft, sclDrw.get() );
 	sclDrw->setParent( plot_ );
 	sclDrw.release();
-	plot_->setAxisScale( QwtPlot::yLeft, -yScale_ - 1, yScale_ );
+	plot_->setAxisScale( QwtPlot::yLeft, -axisSclLeft_->rawScale() - 1, axisSclLeft_->rawScale() );
 
 	QObject::connect( zoom_, &QwtPlotZoomer::zoomed, axisSclLeft_, &ScaleXfrm::setRect );
 	// connect to 'selected'; zoomed is emitted *after* the labels are painted
 	QObject::connect( zoom_, qOverload<const QRectF&>(&QwtPlotPicker::selected), axisSclLeft_, &ScaleXfrm::setRect );
 
-	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( zoom_ ) );
+	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( zoom_, vYScale_[1] ) );
+	axisSclRight_ = sclDrw.get();
+	plot_->setAxisScaleDraw( QwtPlot::yRight, sclDrw.get() );
+	sclDrw->setParent( plot_ );
+	sclDrw.release();
+	plot_->setAxisScale( QwtPlot::yRight, -axisSclRight_->rawScale() - 1, axisSclRight_->rawScale() );
+
+	QObject::connect( zoom_, &QwtPlotZoomer::zoomed, axisSclRight_, &ScaleXfrm::setRect );
+	// connect to 'selected'; zoomed is emitted *after* the labels are painted
+	QObject::connect( zoom_, qOverload<const QRectF&>(&QwtPlotPicker::selected), axisSclRight_, &ScaleXfrm::setRect );
+
+	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( zoom_, nsmpl_ - 1 ) );
 	axisSclBotm_  = sclDrw.get();
 	plot_->setAxisScaleDraw( QwtPlot::xBottom, sclDrw.get() );
 	sclDrw->setParent( plot_ );
 	sclDrw.release();
-	plot_->setAxisScale( QwtPlot::xBottom, 0, nsmpl_ - 1  );
+	plot_->setAxisScale( QwtPlot::xBottom, 0,  axisSclBotm_->rawScale() );
 
 	// necessary after changing the axis scale
 	zoom_->setZoomBase();
@@ -1269,13 +1330,27 @@ Scope::newData(BufPtr buf)
 		trgArm_->setText( "Off" );
 	}
 
+	unsigned hdr = buf->getHdr();
+
 	for ( int ch = 0; ch < vPltCurv_.size(); ch++ ) {
+		// samples
 		vPltCurv_ [ch]->setRawSamples( xRange_, buf->getData( ch ), buf->getNElms() );
+		// measurements
 		vMeanLbls_[ch]->setText( QString::asprintf("%7.2f", buf->getAvg(ch) ) );
 		vStdLbls_ [ch]->setText( QString::asprintf("%7.2f", buf->getStd(ch) ) );
+		// overrange flag
+		bool ovrRng = acq_.bufHdrFlagOverrange( hdr, ch );
+		vOverRange_[ch]->setVisible( ovrRng );
+		leds_->setVal( vOvrLEDNames_[ch], ovrRng );
+		if ( ovrRng ) {
+			printf("CH %d overrange; header 0x%x\n", ch, hdr );
+		}
 	}
+
+	leds_->setVal( "Trig", 1 );
 	lsync_ = buf->getSync();
 
+	// release old buffer; keep reference to the new one
 	curBuf_.swap(buf);
 }
 
@@ -1287,23 +1362,35 @@ Scope::startReader(unsigned poolDepth)
 	}
 	BufPoolPtr bufPool = make_shared<BufPoolPtr::element_type>( nsmpl_ );
 	bufPool->add( poolDepth );
-	reader_ = new ScopeReader( fw_, bufPool, pipe_, this );
+	reader_ = new ScopeReader( unlockedPtr(), bufPool, pipe_, this );
 	reader_->start();
+}
+
+void
+Scope::updateNPreTriggerSamples(unsigned npts)
+{
+	cmd_.npts_ = npts;
+	axisSclBotm_->setRawOffset( npts );
+	postSync();
 }
 
 int
 main(int argc, char **argv)
 {
-const char *fnam = "/dev/pts/3";
+const char *fnam = getenv("FWCOMM_DEVICE");
 int         opt;
 bool        sim  = false;
 
+	if ( ! fnam && ! (fnam = getenv("BBCLI_DEVICE")) ) {
+		fnam = "/dev/ttyACM0";
+	}
+
 	QApplication app(argc, argv);
 
-	while ( (opt = getopt( argc, argv, "d:S" )) > 0 ) {
+	while ( (opt = getopt( argc, argv, "d:s" )) > 0 ) {
 		switch ( opt ) {
 			case 'd': fnam = optarg; break;
-			case 'S': sim  = true;   break;
+			case 's': sim  = true;   break;
 			default:
 				fprintf(stderr, "Error: Unknown option -%c\n", opt);
 				return 1;
