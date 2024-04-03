@@ -37,6 +37,7 @@
 #include <qwt_text.h>
 #include <qwt_scale_div.h>
 #include <qwt_scale_map.h>
+#include <qwt_scale_engine.h>
 #include <qwt_picker_machine.h>
 #include <qwt_plot_curve.h>
 #include <qwt_scale_draw.h>
@@ -988,7 +989,7 @@ public:
 			usml_.push_back( QString::asprintf( *it, unit.toStdString().c_str() ) );
 		}
 		for ( auto it = bigfmt_.begin(); it != bigfmt_.end(); ++it ) {
-			ubig_.push_back( QString::asprintf( *it, unit ) );
+			ubig_.push_back( QString::asprintf( *it, unit.toStdString().c_str() ) );
 		}
 		uptr_ = &ubig_[0];
 		updatePlot();
@@ -1004,6 +1005,12 @@ public:
 	rawOffset()
 	{
 		return roff_;
+	}
+
+	virtual double
+	normScale()
+	{
+		return uscl_;
 	}
 
 
@@ -1080,14 +1087,14 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 			tmp   = 1000.0 / max;
 			while ( ( uscl_ >= tmp ) && (++idx < ubig_.size()) ) {
 				uscl_ /= 1000.0;
+				uptr_  = &ubig_[idx];
 			}
-			uptr_ = &ubig_[idx];
 		} else {
 			tmp   = 1.0 / max;
 			while ( ( uscl_ <= tmp ) && (++idx < usml_.size()) ) {
 				uscl_ *= 1000.0;
+				uptr_  = &usml_[idx];
 			}
-			uptr_ = &usml_[idx];
 		}
 		// does not work
 		// lzoom_->plot()->updateAxes();
@@ -1106,13 +1113,27 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 	virtual double
 	linr(double val, bool decNorm = true) const
 	{
-		double nval = (val - roff_)/rscl_ * scl_ + off_;
+		double nval;
+
+		nval = (val - roff_)/rscl_ * scl_ + off_;
 		if ( decNorm ) {
 			nval *= uscl_;
 		}
 		return nval;
 	}	
-		
+
+	virtual double
+	linv(double val, bool decNorm = true) const
+	{
+		double nval;
+
+		if ( decNorm ) {
+			val /= uscl_;
+		}
+		nval = (val - off_)/scl_ * rscl_ + roff_;
+		return nval;
+	}
+			
 	virtual QwtText
 	label(double val) const override
 	{
@@ -1128,6 +1149,59 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 		printf( "setRect (%s): l->r %f -> %f\n", unit_.toStdString().c_str(), r.left(), r.right() );
 	}
 };
+
+class ScopeSclEng : public QwtLinearScaleEngine {
+	ScaleXfrm *xfrm_;
+public:
+	ScopeSclEng(ScaleXfrm *xfrm, uint base = 10)
+	: QwtLinearScaleEngine( base ),
+	  xfrm_               ( xfrm )
+	{
+	}
+
+	// map to transformed coordinates, use original algorithm to compute the scale and map back...
+	virtual QwtScaleDiv
+	divideScale(double x1, double x2, int maxMajorSteps, int maxMinorSteps, double stepSize = 0.0)
+	const override
+	{
+#if 0
+		printf("ORIG Scale Eng: x1 %lf, x2 %lf, maj %d, min %d, stepsz %lf\n", x1, x2, stepSize);
+		printf("SCALE DIV %lf -> %lf [%lf] (scl %lf, off %lf, rscl %lf, roff %lf, nscl %lf)\n", x1, x2, stepSize,
+			xfrm_->scale(),
+			xfrm_->offset(),
+			xfrm_->rawScale(),
+			xfrm_->rawOffset(),
+			xfrm_->normScale()
+		);
+#endif
+		x1 = xfrm_->linr( x1 );
+		x2 = xfrm_->linr( x2 );
+		stepSize = xfrm_->linr( stepSize ) - xfrm_->linr( 0.0 );
+#if 0
+		printf("XFRM Scale Eng: x1 %lf, x2 %lf, maj %d, min %d, stepsz %lf\n",
+			x1, x2, maxMajorSteps, maxMinorSteps, stepSize
+		);
+#endif
+		auto rv    = QwtLinearScaleEngine::divideScale(x1, x2, maxMajorSteps, maxMinorSteps, stepSize);
+
+		for ( auto i = 0; i < QwtScaleDiv::NTickTypes; i++ ) {
+
+			auto ticks = rv.ticks( i );
+
+			for ( auto it = ticks.begin(); it != ticks.end(); ++it ) {
+				*it = xfrm_->linv( *it );
+			}
+
+			rv.setTicks( i, ticks );
+		}
+
+		rv.setUpperBound( xfrm_->linv( rv.upperBound() ) );
+		rv.setLowerBound( xfrm_->linv( rv.lowerBound() ) );
+
+		return rv;
+	}
+};
+
 
 vector<const char *>
 ScaleXfrm::bigfmt_ = vector<const char *>({
@@ -1243,7 +1317,6 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	// connect to 'selected'; zoomed is emitted *after* the labels are painted
 	for ( auto it = vAxisVScl_.begin(); it != vAxisVScl_.end(); ++it ) {
-printf("axis %p\n", *it);
 		QObject::connect( lzoom_, qOverload<const QRectF&>(&QwtPlotPicker::selected), *it,  &ScaleXfrm::setRect );
 		(*it)->setRect( lzoom_->zoomRect() );
 	}
@@ -1356,6 +1429,13 @@ printf("axis %p\n", *it);
 	centWid->setLayout( horzLay.release() );
 	mainWid->setCentralWidget( centWid.release() );
 	mainWin_.swap( mainWid );
+
+// no point creating these here; they need to be recreated every time anything that affects
+// the scale changes; happens in Scope::updateScale() [also the reason why they ended up
+// here at the end -- setting early missed any changes to the scale at a later point] :-(
+//	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( vAxisVScl_[CHA_IDX] ) );
+//	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( vAxisVScl_[CHB_IDX] ) );
+//	plot_->setAxisScaleEngine( QwtPlot::xBottom, new ScopeSclEng( axisHScl_     ) );
 
 	xRange.release();
 }
@@ -1551,12 +1631,17 @@ Scope::updateScale( ScaleXfrm *xfrm )
 {
 	if ( xfrm == vAxisVScl_[CHA_IDX] ) {
 		plot_->setAxisTitle( QwtPlot::yLeft,   *xfrm->getUnit() );
+		// the only way to let updateAxes recompute the scale ticks is replacing the scale
+		// engine. Note that setAxisScaleEngine() takes ownership (and deletes the old engine)
+		plot_->setAxisScaleEngine( QwtPlot::yLeft, new ScopeSclEng( vAxisVScl_[CHA_IDX] ) );
 	} else if ( xfrm == vAxisVScl_[CHB_IDX] ) {
 		plot_->setAxisTitle( QwtPlot::yRight,  *xfrm->getUnit() );
+		plot_->setAxisScaleEngine( QwtPlot::yRight, new ScopeSclEng( vAxisVScl_[CHB_IDX] ) );
 	} else if ( xfrm == axisHScl_ ) {
 		plot_->setAxisTitle( QwtPlot::xBottom, *xfrm->getUnit() );
+		plot_->setAxisScaleEngine( QwtPlot::xBottom, new ScopeSclEng( axisHScl_ ) );
 	}
-	
+
 	plot_->updateAxes();
 	plot_->autoRefresh();
 	plot_->axisWidget( QwtPlot::yLeft   )->update();
