@@ -87,6 +87,7 @@ class ScaleXfrm;
 class TrigArmMenu;
 class ScopeZoomer;
 class TrigLevel;
+class ParamUpdateVisitor;
 
 class ScaleXfrm;
 
@@ -127,6 +128,7 @@ private:
 	unsigned                              lsync_;
 	QwtPlotPicker                        *picker_;
 	TrigLevel                            *trigLvl_;
+    ParamUpdateVisitor                   *paramUpd_;
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
@@ -278,7 +280,19 @@ public:
 	updateScale( ScaleXfrm * );
 };
 
-class ValChangedVisitor;
+class TrigSrcMenu;
+class TrigEdgMenu;
+class TrigAutMenu;
+class TrigArmMenu;
+
+class ValChangedVisitor
+{
+public:
+	virtual void visit( TrigSrcMenu *) {}
+	virtual void visit( TrigEdgMenu *) {}
+	virtual void visit( TrigAutMenu *) {}
+	virtual void visit( TrigArmMenu *) {}
+};
 
 class ValUpdater {
 	std::list<ValChangedVisitor*> subscribers_;
@@ -288,7 +302,7 @@ public:
 	virtual void valChanged()
 	{
 		for ( auto it = subscribers_.begin(); it != subscribers_.end(); ++it ) {
-			it->accept( this );
+			accept( *it );
 		}
 	}
 
@@ -359,7 +373,7 @@ public:
 	}
 };
 
-class MenuButton : public QPushButton, public TxtActionNotify {
+class MenuButton : public QPushButton, public TxtActionNotify, public ValUpdater {
 public:
 	MenuButton( const vector<QString> &lbls, QWidget *parent )
 	: QPushButton( parent )
@@ -394,6 +408,7 @@ public:
 	notify(TxtAction *act) override
 	{
 		setText( act->text() );
+		valChanged();
 	}
 };
 
@@ -432,23 +447,9 @@ public:
 	}
 
 	virtual void
-	notify(TxtAction *act) override
+	accept(ValChangedVisitor *v)
 	{
-		MenuButton::notify( act );
-		TriggerSource src;
-		bool          rising;
-		scp_->acq()->getTriggerSrc( &src, &rising );
-
-		const QString &s = act->text();
-		if ( s == "Channel A" ) {
-			src = CHA;
-		} else if ( s == "Channel B" ) {
-			src = CHB;
-		} else {
-			src = EXT;
-		}
-		scp_->acq()->setTriggerSrc( src, rising );
-		scp_->updateLevelMarker( src );
+		v->visit( this );
 	}
 };
 
@@ -594,22 +595,15 @@ public:
 	}
 
 	virtual void
-	notify(TxtAction *act) override
+	accept(ValChangedVisitor *v)
 	{
-		MenuButton::notify( act );
-		TriggerSource src;
-		bool          rising;
-		scp_->acq()->getTriggerSrc( &src, &rising );
-
-		const QString &s = act->text();
-		rising = (s == "Rising");
-		scp_->acq()->setTriggerSrc( src, rising );
+		v->visit( this );
 	}
 };
 
+
 class TrigAutMenu : public MenuButton {
 private:
-	Scope *scp_;
 
 	static vector<QString>
 	mkStrings(Scope *scp)
@@ -629,20 +623,16 @@ private:
 	
 public:
 	TrigAutMenu(Scope *scp, QWidget *parent = NULL)
-	: MenuButton( mkStrings( scp ), parent ),
-	  scp_(scp)
+	: MenuButton( mkStrings( scp ), parent )
 	{
 	}
 
 	virtual void
-	notify(TxtAction *act) override
+	accept(ValChangedVisitor *v)
 	{
-		MenuButton::notify( act );
-
-		const QString &s = act->text();
-		int ms = (s == "On") ? 100 : -1;
-		scp_->acq()->setAutoTimeoutMS( ms );
+		v->visit( this );
 	}
+
 };
 
 class TrigArmMenu : public MenuButton {
@@ -677,16 +667,69 @@ public:
 	}
 
 	virtual void
+	accept(ValChangedVisitor *v)
+	{
+		v->visit( this );
+	}
+
+	virtual void
 	notify(TxtAction *act) override
 	{
+		single_ = (act->text() == "Single");
 		MenuButton::notify( act );
-		single_ = (text() == "Single");
-		scp_->clrTrgLED();
-		scp_->postTrgMode( act->text() );
-
 	}
 };
 
+class ParamUpdateVisitor : public ValChangedVisitor {
+	Scope *scp_;
+public:
+	ParamUpdateVisitor(Scope *scp)
+	: scp_( scp )
+	{
+	}
+
+	virtual void visit( TrigSrcMenu *mnu ) override
+	{
+		TriggerSource src;
+		bool          rising;
+		scp_->acq()->getTriggerSrc( &src, &rising );
+
+		const QString &s = mnu->text();
+		if ( s == "Channel A" ) {
+			src = CHA;
+		} else if ( s == "Channel B" ) {
+			src = CHB;
+		} else {
+			src = EXT;
+		}
+		scp_->acq()->setTriggerSrc( src, rising );
+		scp_->updateLevelMarker( src );
+	}
+
+	virtual void visit( TrigEdgMenu *mnu ) override
+	{
+		TriggerSource src;
+		bool          rising;
+		scp_->acq()->getTriggerSrc( &src, &rising );
+
+		const QString &s = mnu->text();
+		rising = (s == "Rising");
+		scp_->acq()->setTriggerSrc( src, rising );
+	}
+
+	virtual void visit( TrigAutMenu *mnu ) override
+	{
+		const QString &s = mnu->text();
+		int ms = (s == "On") ? 100 : -1;
+		scp_->acq()->setAutoTimeoutMS( ms );
+	}
+
+	virtual void visit( TrigArmMenu *mnu ) override
+	{
+		scp_->clrTrgLED();
+		scp_->postTrgMode( mnu->text() );
+	}
+};
 
 class ParamSetError {};
 
@@ -1270,7 +1313,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
   trgArm_        ( NULL     ),
   single_        ( false    ),
   lsync_         ( 0        ),
-  picker_        ( NULL     )
+  picker_        ( NULL     ),
+  paramUpd_      ( NULL     )
 {
 	if ( 0 == nsmpl_ || nsmpl_ > acq_.getMaxNSamples() ) {
 		nsmpl_ = acq_.getMaxNSamples();
@@ -1283,6 +1327,9 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	for ( int i = 0; i < nsmpl_; i++ ) {
 		xRange_[i] = (double)i;
 	}
+
+	auto paramUpd    = unique_ptr<ParamUpdateVisitor>( new ParamUpdateVisitor( this ) );
+	paramUpd_        = paramUpd.get();
 
 	vChannelColors_.push_back( QColor( Qt::blue  ) );
 	vChannelColors_.push_back( QColor( Qt::black ) );
@@ -1378,11 +1425,23 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	trigLvl_      = new TrigLevel( editWid.get(), this );
 	formLay->addRow( new QLabel( "Trigger Level [%]" ), editWid.release() );
 
-	formLay->addRow( new QLabel( "Trigger Source"    ), new TrigSrcMenu( this ) );
-	formLay->addRow( new QLabel( "Trigger Edge"      ), new TrigEdgMenu( this ) );
-	formLay->addRow( new QLabel( "Trigger Auto"      ), new TrigAutMenu( this ) );
+    MenuButton *mnu;
+
+	mnu           = new TrigSrcMenu( this );
+	mnu->subscribe( paramUpd_ );
+	formLay->addRow( new QLabel( "Trigger Source"    ), mnu );
+
+	mnu           = new TrigEdgMenu( this );
+	mnu->subscribe( paramUpd_ );
+	formLay->addRow( new QLabel( "Trigger Edge"      ), mnu );
+
+	mnu           = new TrigAutMenu( this );
+	mnu->subscribe( paramUpd_ );
+	formLay->addRow( new QLabel( "Trigger Auto"      ), mnu );
+
     trgArm_ = new TrigArmMenu( this );
 	formLay->addRow( new QLabel( "Trigger Arm"       ), trgArm_ );
+	trgArm_->subscribe( paramUpd_ );
 
 	editWid       = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	auto npts     = new NPreTriggerSamples( editWid.get(), this );
@@ -1474,6 +1533,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 //	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( vAxisVScl_[CHB_IDX] ) );
 //	plot_->setAxisScaleEngine( QwtPlot::xBottom, new ScopeSclEng( axisHScl_     ) );
 
+    paramUpd.release();
 	xRange.release();
 }
 
@@ -1484,6 +1544,9 @@ Scope::~Scope()
 	}
 	if ( picker_ ) {
 		delete picker_;
+	}
+	if ( paramUpd_ ) {
+		delete paramUpd_;
 	}
 }
 
