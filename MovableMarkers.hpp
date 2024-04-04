@@ -7,10 +7,15 @@
 #include <vector>
 
 class MovableMarker  : public QwtPlotMarker {
+protected:
+	QPointF here_;
 public:
 
 	virtual void
-	update( const QPointF & ) = 0;
+	update( const QPointF & p )
+	{
+		here_ =  p;
+	}
 
 	virtual void
 	updateDone()              = 0;

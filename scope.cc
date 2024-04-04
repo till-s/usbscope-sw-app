@@ -28,6 +28,7 @@
 #include <vector>
 #include <string>
 #include <utility>
+#include <list>
 #include <math.h>
 #include <stdlib.h>
 
@@ -277,6 +278,35 @@ public:
 	updateScale( ScaleXfrm * );
 };
 
+class ValChangedVisitor;
+
+class ValUpdater {
+	std::list<ValChangedVisitor*> subscribers_;
+public:
+	virtual void accept(ValChangedVisitor *v) = 0;
+
+	virtual void valChanged()
+	{
+		for ( auto it = subscribers_.begin(); it != subscribers_.end(); ++it ) {
+			it->accept( this );
+		}
+	}
+
+	virtual void subscribe(ValChangedVisitor *v)
+	{
+		subscribers_.push_back( v );
+	}
+
+	virtual void unsubscribe(ValChangedVisitor *v)
+	{
+		subscribers_.remove( v );
+	}
+
+	virtual ~ValUpdater()
+	{
+	}
+};
+
 class ScopeZoomer : public QwtPlotZoomer {
 public:
 	ScopeZoomer( int xAxisId, int yAxisId, QWidget *canvas )
@@ -305,15 +335,15 @@ public:
 
 class TxtAction;
 
-class TxtActionVisitor {
+class TxtActionNotify {
 public:
-	virtual void visit(TxtAction *) = 0;
+	virtual void notify(TxtAction *) = 0;
 };
 
 class TxtAction : public QAction {
-	TxtActionVisitor *v_;
+	TxtActionNotify *v_;
 public:
-	TxtAction(const QString &txt, QObject *parent, TxtActionVisitor *v = NULL)
+	TxtAction(const QString &txt, QObject *parent, TxtActionNotify *v = NULL)
 	: QAction( txt, parent ),
 	  v_( v )
 	{
@@ -324,12 +354,12 @@ public:
 	forward(bool unused)
 	{
 		if ( v_ ) {
-			v_->visit( this );
+			v_->notify( this );
 		}
 	}
 };
 
-class MenuButton : public QPushButton, public TxtActionVisitor {
+class MenuButton : public QPushButton, public TxtActionNotify {
 public:
 	MenuButton( const vector<QString> &lbls, QWidget *parent )
 	: QPushButton( parent )
@@ -361,7 +391,7 @@ public:
 	}
 
 	virtual void
-	visit(TxtAction *act) override
+	notify(TxtAction *act) override
 	{
 		setText( act->text() );
 	}
@@ -402,9 +432,9 @@ public:
 	}
 
 	virtual void
-	visit(TxtAction *act) override
+	notify(TxtAction *act) override
 	{
-		MenuButton::visit( act );
+		MenuButton::notify( act );
 		TriggerSource src;
 		bool          rising;
 		scp_->acq()->getTriggerSrc( &src, &rising );
@@ -564,9 +594,9 @@ public:
 	}
 
 	virtual void
-	visit(TxtAction *act) override
+	notify(TxtAction *act) override
 	{
-		MenuButton::visit( act );
+		MenuButton::notify( act );
 		TriggerSource src;
 		bool          rising;
 		scp_->acq()->getTriggerSrc( &src, &rising );
@@ -605,9 +635,9 @@ public:
 	}
 
 	virtual void
-	visit(TxtAction *act) override
+	notify(TxtAction *act) override
 	{
-		MenuButton::visit( act );
+		MenuButton::notify( act );
 
 		const QString &s = act->text();
 		int ms = (s == "On") ? 100 : -1;
@@ -647,9 +677,9 @@ public:
 	}
 
 	virtual void
-	visit(TxtAction *act) override
+	notify(TxtAction *act) override
 	{
-		MenuButton::visit( act );
+		MenuButton::notify( act );
 		single_ = (text() == "Single");
 		scp_->clrTrgLED();
 		scp_->postTrgMode( act->text() );
@@ -781,6 +811,12 @@ public:
 	virtual void
 	update( const QPointF & point ) override
 	{
+		setLabel( QwtText( QString::asprintf( "%5.3lf", point.y() ) ) );
+        if ( point.y() > 0.0 ) {
+			setLabelAlignment( Qt::AlignBottom );
+		} else {
+			setLabelAlignment( Qt::AlignTop    );
+		}
 		setValue( point.x(), point.y() );
 		lvl_ = 100.0*point.y() / getScale();
 		updating_ = true;
@@ -790,6 +826,7 @@ public:
 	virtual void
 	updateDone() override
 	{
+		setLabel( QwtText() );
 		scp_->acq()->setTriggerLevelPercent( lvl_ );
 		updating_ = false;
 		getAction();
@@ -1623,6 +1660,7 @@ Scope::updateLevelMarker( TriggerSource src )
 			break;
 		default:
 			trigLvl_->setVisible( false );
+			break;
 	}
 }
 
