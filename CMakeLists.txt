@@ -7,7 +7,15 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets)
 find_library(QWT NAMES qwt qwt6 qwt-qt5)
 set(AUTOMOC ON)
 
-add_executable(scope scope.cc SysPipe.cpp ScopeReader.cpp MovableMarkers.cpp)
+
+set(SRCS
+	"scope.cc"
+	"SysPipe.cpp"
+	"ScopeReader.cpp"
+	"MovableMarkers.cpp"
+)
+
+add_executable(scope ${SRCS})
 include_directories(./ ../lib ../../artix7_v1/fw/modules/usbadc-support/sw/ /usr/include/qwt)
 set_target_properties(scope PROPERTIES AUTOMOC ON)
 

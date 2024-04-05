@@ -145,10 +145,20 @@ public:
 	void
 	updateHScale();
 
-	void
-	updateLevelMarker(TriggerSource);
-
 	void startReader(unsigned poolDepth = 4);
+
+	ScaleXfrm *
+	axisVScl(int channel)
+	{
+		return vAxisVScl_[ channel ];
+	}
+
+	ScaleXfrm *
+	axisHScl()
+	{
+		return axisHScl_;
+	}
+
 
 	const QString *
 	getChannelName(int channel)
@@ -284,20 +294,33 @@ class TrigSrcMenu;
 class TrigEdgMenu;
 class TrigAutMenu;
 class TrigArmMenu;
+class TrigLevel;
+class AttenuatorSlider;
+class FECTerminationTgl;
+class FECAttenuatorTgl;
+class FECACCouplingTgl;
+class ScaleXfrm;
 
 class ValChangedVisitor
 {
 public:
-	virtual void visit( TrigSrcMenu *) {}
-	virtual void visit( TrigEdgMenu *) {}
-	virtual void visit( TrigAutMenu *) {}
-	virtual void visit( TrigArmMenu *) {}
+	virtual void visit( TrigSrcMenu *)      {}
+	virtual void visit( TrigEdgMenu *)      {}
+	virtual void visit( TrigAutMenu *)      {}
+	virtual void visit( TrigArmMenu *)      {}
+	virtual void visit( TrigLevel   *)      {}
+	virtual void visit(AttenuatorSlider *)  {}
+	virtual void visit(FECTerminationTgl *) {}
+	virtual void visit(FECAttenuatorTgl *)  {}
+	virtual void visit(FECACCouplingTgl *)  {}
+	virtual void visit(ScaleXfrm        *)  {}
 };
 
-class ValUpdater {
-	std::list<ValChangedVisitor*> subscribers_;
+template <typename T>
+class Dispatcher {
+	std::list<T*> subscribers_;
 public:
-	virtual void accept(ValChangedVisitor *v) = 0;
+	virtual void accept(T *v) = 0;
 
 	virtual void valChanged()
 	{
@@ -306,20 +329,22 @@ public:
 		}
 	}
 
-	virtual void subscribe(ValChangedVisitor *v)
+	virtual void subscribe(T *v)
 	{
 		subscribers_.push_back( v );
 	}
 
-	virtual void unsubscribe(ValChangedVisitor *v)
+	virtual void unsubscribe(T *v)
 	{
 		subscribers_.remove( v );
 	}
 
-	virtual ~ValUpdater()
+	virtual ~Dispatcher()
 	{
 	}
 };
+
+typedef Dispatcher<ValChangedVisitor> ValUpdater;
 
 class ScopeZoomer : public QwtPlotZoomer {
 public:
@@ -347,692 +372,7 @@ public:
 	}
 };
 
-class TxtAction;
-
-class TxtActionNotify {
-public:
-	virtual void notify(TxtAction *) = 0;
-};
-
-class TxtAction : public QAction {
-	TxtActionNotify *v_;
-public:
-	TxtAction(const QString &txt, QObject *parent, TxtActionNotify *v = NULL)
-	: QAction( txt, parent ),
-	  v_( v )
-	{
-		QObject::connect( this, &QAction::triggered, this, &TxtAction::forward );
-	}
-
-	void
-	forward(bool unused)
-	{
-		if ( v_ ) {
-			v_->notify( this );
-		}
-	}
-};
-
-class MenuButton : public QPushButton, public TxtActionNotify, public ValUpdater {
-public:
-	MenuButton( const vector<QString> &lbls, QWidget *parent )
-	: QPushButton( parent )
-	{
-		auto menu = new QMenu( this );
-		setText( lbls[0] );
-		auto it  = lbls.begin();
-		auto ite = lbls.end();
-		it++;
-		// if the first label is among the following elements
-		// it is the default/initial value
-		bool found = false;
-		while ( it != ite and ! found ) {
-			if ( lbls[0] == *it ) {
-				found = true;
-			}
-			it++;
-		}
-		it = lbls.begin();
-		if ( found ) {
-			it++;
-		}
-		while ( it != ite ) {
-			auto act = new TxtAction( *it, menu, this );
-			it++;
-			menu->addAction( act );
-		}
-		setMenu( menu );
-	}
-
-	virtual void
-	notify(TxtAction *act) override
-	{
-		setText( act->text() );
-		valChanged();
-	}
-};
-
-class TrigSrcMenu : public MenuButton {
-private:
-	Scope   *scp_;
-
-	static vector<QString>
-	mkStrings(Scope *scp)
-	{
-		TriggerSource src;
-		scp->acq()->getTriggerSrc( &src, NULL );
-		vector<QString> rv;
-		switch ( src ) {
-			case CHA:
-				rv.push_back( "Channel A" );
-				break;
-			case CHB:
-				rv.push_back( "Channel B" );
-				break;
-			default:
-				rv.push_back( "External" );
-				break;
-		}
-		rv.push_back( "Channel A" );
-		rv.push_back( "Channel B" );
-		rv.push_back( "External"  );
-		return rv;	
-	}
-
-public:
-	TrigSrcMenu(Scope *scp, QWidget *parent = NULL)
-	: MenuButton( mkStrings( scp ), parent ),
-	  scp_(scp)
-	{
-	}
-
-	virtual void
-	accept(ValChangedVisitor *v)
-	{
-		v->visit( this );
-	}
-};
-
-class TglButton : public QPushButton {
-protected:
-	Scope             *scp_;
-	vector<QString>    lbls_;
-public:
-	TglButton( Scope *scp, const vector<QString> &lbls, QWidget * parent = NULL )
-	: QPushButton( parent ),
-	  scp_  ( scp  ),
-	  lbls_ ( lbls )
-	{
-		setCheckable  ( true  );
-		setAutoDefault( false );
-		QObject::connect( this, &QPushButton::toggled, this, &TglButton::activated );
-	}
-
-	virtual void
-	setLbl(bool checked)
-	{
-		if ( checked ) {
-			setText( lbls_[0] );
-		} else {
-			setText( lbls_[1] );
-		}
-		setChecked( checked );
-	}
-
-	void
-	activated(bool checked)
-	{
-		setLbl( checked );
-		setVal( checked );
-	}
-
-	virtual void setVal(bool) = 0;
-	virtual bool getVal(    ) = 0;
-};
-
-class FECTerminationTgl : public TglButton {
-private:
-	int                 channel_;
-	std::string         ledName_;
-public:
-
-	FECTerminationTgl( Scope *scp, int channel, QWidget * parent = NULL )
-	: TglButton( scp, vector<QString>( {"50Ohm", "1MOhm" } ), parent ),
-	  channel_( channel ),
-	  ledName_( std::string("Term") + scp->getChannelName( channel )->toStdString() )
-	{
-		bool v = getVal();
-		setLbl( v );
-		scp_->leds()->setVal( ledName_, v );
-	}
-
-	virtual void setVal(bool checked) override
-	{
-		scp_->fec()->setTermination( channel_, checked );
-		scp_->leds()->setVal( ledName_, checked );
-	}
-
-	virtual bool getVal() override
-	{
-		return scp_->fec()->getTermination( channel_ );
-	}
-};
-
-class FECACCouplingTgl : public TglButton {
-private:
-	int                 channel_;
-public:
-
-	FECACCouplingTgl( Scope *scp, int channel, QWidget * parent = NULL )
-	: TglButton( scp, vector<QString>( {"AC", "DC" } ), parent ),
-	  channel_( channel )
-	{
-		setLbl( getVal() );
-	}
-
-	virtual void setVal(bool checked) override
-	{
-		scp_->fec()->setACMode( channel_, checked );
-	}
-
-	virtual bool getVal() override
-	{
-		return scp_->fec()->getACMode( channel_ );
-	}
-};
-
-class FECAttenuatorTgl : public TglButton {
-private:
-	int                 channel_;
-public:
-
-	FECAttenuatorTgl( Scope *scp, int channel, QWidget * parent = NULL )
-	: TglButton( scp, vector<QString>( {"-20dB", "0dB" } ), parent ),
-	  channel_( channel )
-	{
-		setLbl( getVal() );
-	}
-
-	virtual void setVal(bool checked) override
-	{
-		scp_->fec()->setAttenuator( channel_, checked );
-		scp_->updateVScale( channel_ );
-	}
-
-	virtual bool getVal() override
-	{
-		return scp_->fec()->getAttenuator( channel_ );
-	}
-};
-
-
-
-class TrigEdgMenu : public MenuButton {
-private:
-	Scope *scp_;
-
-	static vector<QString>
-	mkStrings(Scope *scp)
-	{
-		bool rising;
-		scp->acq()->getTriggerSrc( NULL, &rising );
-		vector<QString> rv;
-		if ( rising ) {
-			rv.push_back( "Rising"  );
-		} else {
-			rv.push_back( "Falling" );
-		}
-		rv.push_back( "Rising"  );
-		rv.push_back( "Falling" );
-		return rv;	
-	}
-	
-public:
-	TrigEdgMenu(Scope *scp, QWidget *parent = NULL)
-	: MenuButton( mkStrings( scp ), parent ),
-	  scp_(scp)
-	{
-	}
-
-	virtual void
-	accept(ValChangedVisitor *v)
-	{
-		v->visit( this );
-	}
-};
-
-
-class TrigAutMenu : public MenuButton {
-private:
-
-	static vector<QString>
-	mkStrings(Scope *scp)
-	{
-		int ms = scp->acq()->getAutoTimeoutMS();
-
-		vector<QString> rv;
-		if ( ms >= 0 ) {
-			rv.push_back( "On"  );
-		} else {
-			rv.push_back( "Off" );
-		}
-		rv.push_back( "On"  );
-		rv.push_back( "Off" );
-		return rv;	
-	}
-	
-public:
-	TrigAutMenu(Scope *scp, QWidget *parent = NULL)
-	: MenuButton( mkStrings( scp ), parent )
-	{
-	}
-
-	virtual void
-	accept(ValChangedVisitor *v)
-	{
-		v->visit( this );
-	}
-
-};
-
-class TrigArmMenu : public MenuButton {
-private:
-	Scope *scp_;
-    bool   single_;
-
-	static vector<QString>
-	mkStrings(Scope *scp)
-	{
-		vector<QString> rv;
-		rv.push_back( "Continuous"  );
-		rv.push_back( "Off" );
-		rv.push_back( "Single"  );
-		rv.push_back( "Continuous"  );
-		return rv;	
-	}
-	
-public:
-	TrigArmMenu(Scope *scp, QWidget *parent = NULL)
-	: MenuButton( mkStrings( scp ), parent ),
-	  scp_(scp)
-	{
-		scp_->clrTrgLED();
-		scp_->postTrgMode( text() );
-	}
-
-	virtual bool
-	single()
-	{
-		return single_;
-	}
-
-	virtual void
-	accept(ValChangedVisitor *v)
-	{
-		v->visit( this );
-	}
-
-	virtual void
-	notify(TxtAction *act) override
-	{
-		single_ = (act->text() == "Single");
-		MenuButton::notify( act );
-	}
-};
-
-class ParamUpdateVisitor : public ValChangedVisitor {
-	Scope *scp_;
-public:
-	ParamUpdateVisitor(Scope *scp)
-	: scp_( scp )
-	{
-	}
-
-	virtual void visit( TrigSrcMenu *mnu ) override
-	{
-		TriggerSource src;
-		bool          rising;
-		scp_->acq()->getTriggerSrc( &src, &rising );
-
-		const QString &s = mnu->text();
-		if ( s == "Channel A" ) {
-			src = CHA;
-		} else if ( s == "Channel B" ) {
-			src = CHB;
-		} else {
-			src = EXT;
-		}
-		scp_->acq()->setTriggerSrc( src, rising );
-		scp_->updateLevelMarker( src );
-	}
-
-	virtual void visit( TrigEdgMenu *mnu ) override
-	{
-		TriggerSource src;
-		bool          rising;
-		scp_->acq()->getTriggerSrc( &src, &rising );
-
-		const QString &s = mnu->text();
-		rising = (s == "Rising");
-		scp_->acq()->setTriggerSrc( src, rising );
-	}
-
-	virtual void visit( TrigAutMenu *mnu ) override
-	{
-		const QString &s = mnu->text();
-		int ms = (s == "On") ? 100 : -1;
-		scp_->acq()->setAutoTimeoutMS( ms );
-	}
-
-	virtual void visit( TrigArmMenu *mnu ) override
-	{
-		scp_->clrTrgLED();
-		scp_->postTrgMode( mnu->text() );
-	}
-};
-
-class ParamSetError {};
-
-class ParamValidator : public QValidator {
-private:
-	QLineEdit *edt_;
-
-	ParamValidator(const ParamValidator & ) = delete;
-
-	ParamValidator&
-	operator=(const ParamValidator & )      = delete;
-
-public:
-	ParamValidator( QLineEdit *edt, QValidator *parent )
-	: QValidator( parent ),
-	  edt_      ( edt    )
-	{
-		parent->setParent( edt  );
-		edt->setValidator( this );
-		QObject::connect( edt_, &QLineEdit::returnPressed, this, &ParamValidator::setAction );
-		QObject::connect( edt_, &QLineEdit::editingFinished, this, &ParamValidator::getAction );
-	}
-
-	virtual void
-	setAction()
-	{
-		try {
-			set( edt_->text() );
-		} catch ( ParamSetError &e ) {
-			getAction();
-		}
-	}
-
-	virtual void
-	getAction()
-	{
-		QString s;
-		get( s );
-		edt_->setText( s );
-	}
-
-	virtual void
-	get(QString &)       const = 0;
-
-	virtual void
-	set(const QString &)       = 0;
-
-	void
-	fixup(QString &s) const override
-	{
-		get( s );
-	}
-
-	// delegate to associated 'real' validator
-	State
-	validate( QString &s, int &pos ) const override
-	{
-		return static_cast<QValidator *>( parent() )->validate( s, pos );
-	}
-};
-
-class MyVal : public ParamValidator {
-mutable int val;
-QString fmt;
-public:
-	MyVal( QLineEdit *edt )
-	: ParamValidator( edt, new QIntValidator(-10,10) )
-	{
-		val = 5;
-		fmt = "%1";
-		getAction();
-	}
-
-	void get(QString &s) const override
-	{
-		s = fmt.arg(val);
-	}
-
-	void set(const QString &s) override
-	{
-		bool ok;
-		unsigned  v = s.toUInt( &ok );
-		if ( ! ok ) {
-			throw ParamSetError();
-		} else {
-			val = v;
-		}
-	}
-
-};
-
-class TrigLevel : public ParamValidator, public MovableMarker {
-private:
-	Scope         *scp_;
-	mutable double lvl_;
-	bool           updating_;
-	
-public:
-	TrigLevel( QLineEdit *edt, Scope *scp )
-	: ParamValidator( edt, new QDoubleValidator(-100.0,100.0, 1) ),
-	  MovableMarker(       ),
-      scp_         ( scp   ),
-	  updating_    ( false )
-	{
-		getAction();
-	}
-
-	virtual double
-	getVal() const
-	{
-		return (lvl_ = scp_->acq()->getTriggerLevelPercent() );
-	}
-
-	virtual void
-	setVal(double v)
-	{
-		lvl_ = v;
-		scp_->acq()->setTriggerLevelPercent( v );
-		updateMark();
-	}
-
-	virtual void
-	update( const QPointF & point ) override
-	{
-		setLabel( QwtText( QString::asprintf( "%5.3lf", point.y() ) ) );
-        if ( point.y() > 0.0 ) {
-			setLabelAlignment( Qt::AlignBottom );
-		} else {
-			setLabelAlignment( Qt::AlignTop    );
-		}
-		setValue( point.x(), point.y() );
-		lvl_ = 100.0*point.y() / getScale();
-		updating_ = true;
-		getAction();
-	}
-
-	virtual void
-	updateDone() override
-	{
-		setLabel( QwtText() );
-		scp_->acq()->setTriggerLevelPercent( lvl_ );
-		updating_ = false;
-		getAction();
-	}
-
-	virtual void get(QString &s) const override
-	{
-		if ( updating_ ) {
-			s = QString::asprintf( "%.0lf", lvl_ );
-		} else {
-			s = QString::asprintf("%.0f", getVal());
-		}
-	}
-
-	virtual void set(const QString &s) override
-	{
-		setVal( s.toDouble() );
-	}
-
-	virtual double
-	getScale()
-	{
-		return scp_->getZoom()->zoomBase().bottom();
-	}
-
-	virtual void
-	updateMark()
-	{
-		auto scl = getScale();
-		setValue( 0.0, scl * lvl_/100.0 );
-	}
-
-	virtual void
-	attach( QwtPlot *plot )
-	{
-		MovableMarker::attach( plot );
-		updateMark();
-	}
-};
-
-class IntParamValidator : public ParamValidator {
-protected:
-	Scope *scp_;
-public:
-	IntParamValidator( QLineEdit *edt, Scope *scp, int min, int max )
-	: ParamValidator( edt, new QIntValidator(min, max) ),
-	  scp_(scp)
-	{
-	}
-
-	virtual int getVal() const = 0;
-	virtual void setVal(int)   = 0;
-
-	virtual void get(QString &s) const override
-	{
-		s = QString::asprintf("%d", getVal());
-	}
-
-	virtual void set(const QString &s) override
-	{
-		unsigned n = s.toUInt();
-		setVal( n );
-	}
-};
-
-class NPreTriggerSamples : public IntParamValidator {
-public:
-	NPreTriggerSamples( QLineEdit *edt, Scope *scp )
-	: IntParamValidator( edt, scp, 0, scp->getNSamples() - 1 )
-	{
-		if ( getVal() >= scp->getNSamples() ) {
-			setVal( 0 );
-		}
-		getAction();
-	}
-
-	virtual int
-	getVal() const override
-	{
-		return scp_->acq()->getNPreTriggerSamples();
-	}
-
-	virtual void
-	setVal(int n) override
-	{
-		scp_->acq()->setNPreTriggerSamples( n );
-		scp_->updateNPreTriggerSamples( n );
-	}
-
-};
-
-class Decimation : public IntParamValidator {
-public:
-	Decimation( QLineEdit *edt, Scope *scp )
-	: IntParamValidator( edt, scp, 1, 16*(1<<12) )
-	{
-		getAction();
-	}
-
-	virtual int
-	getVal() const override
-	{
-		return scp_->getDecimation();
-	}
-
-	virtual void
-	setVal(int n) override
-	{
-		scp_->setDecimation( n );
-	}
-};
-
-class LabeledSlider : public QSlider {
-protected:
-	Scope   *scp_;
-	QLabel  *lbl_;
-	QString  unit_;
-public:
-	LabeledSlider( Scope *scp, QLabel *lbl, const QString &unit, Qt::Orientation orient, QWidget *parent = NULL )
-	: QSlider( orient, parent ),
-	  scp_ ( scp  ),
-	  lbl_ ( lbl  ),
-	  unit_( unit )
-	{
-		QObject::connect( this, &QSlider::valueChanged, this, &LabeledSlider::update );
-	}
-
-	void
-	update(int val)
-	{
-		updateVal( val );
-		lbl_->setText( QString::asprintf("%d", val) + unit_ );	
-	}
-
-	virtual void updateVal(int) = 0;
-};
-
-class AttenuatorSlider : public LabeledSlider {
-private:
-	int channel_;
-public:
-	AttenuatorSlider( Scope *scp, int channel, QLabel *lbl, Qt::Orientation orient, QWidget *parent = NULL )
-	: LabeledSlider( scp, lbl, "dB", orient, parent ),
-	  channel_( channel )
-	{
-		int  min, max;
-		scp_->pga()->getDBRange( &min, &max );
-		setMinimum( min );
-		setMaximum( max );
-		int att = roundf( scp_->pga()->getDBAtt( channel_ ) );
-		update( att );
-		setValue( att );
-	}
-
-	void
-	updateVal(int val) override
-	{
-		scp_->pga()->setDBAtt( channel_, val );
-		scp_->updateVScale( channel_ );
-	}
-};
-
-class ScaleXfrm : public QObject, public QwtScaleDraw {
+class ScaleXfrm : public QObject, public QwtScaleDraw, public ValUpdater {
 	double              rscl_;
 	double              roff_;
 	double              scl_;
@@ -1073,6 +413,11 @@ public:
 		}
 		uptr_ = &ubig_[0];
 		updatePlot();
+	}
+
+	virtual void accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
 	}
 
 	virtual double
@@ -1188,6 +533,7 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 
 		printf( "calling updateScale (%s): l->r %f -> %f; scl %lf\n", unit_.toStdString().c_str(), rect_.left(), rect_.right(), scl_ );
 		cbck_->updateScale( this );
+		valChanged();
 	}
 
 	virtual double
@@ -1228,6 +574,739 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 		updatePlot();
 		printf( "setRect (%s): l->r %f -> %f\n", unit_.toStdString().c_str(), r.left(), r.right() );
 	}
+};
+
+
+class TxtAction;
+
+class TxtActionNotify {
+public:
+	virtual void notify(TxtAction *) = 0;
+};
+
+class TxtAction : public QAction {
+	TxtActionNotify *v_;
+public:
+	TxtAction(const QString &txt, QObject *parent, TxtActionNotify *v = NULL)
+	: QAction( txt, parent ),
+	  v_( v )
+	{
+		QObject::connect( this, &QAction::triggered, this, &TxtAction::forward );
+	}
+
+	void
+	forward(bool unused)
+	{
+		if ( v_ ) {
+			v_->notify( this );
+		}
+	}
+};
+
+class MenuButton : public QPushButton, public TxtActionNotify, public ValUpdater {
+public:
+	MenuButton( const vector<QString> &lbls, QWidget *parent )
+	: QPushButton( parent )
+	{
+		auto menu = new QMenu( this );
+		setText( lbls[0] );
+		auto it  = lbls.begin();
+		auto ite = lbls.end();
+		it++;
+		// if the first label is among the following elements
+		// it is the default/initial value
+		bool found = false;
+		while ( it != ite and ! found ) {
+			if ( lbls[0] == *it ) {
+				found = true;
+			}
+			it++;
+		}
+		it = lbls.begin();
+		if ( found ) {
+			it++;
+		}
+		while ( it != ite ) {
+			auto act = new TxtAction( *it, menu, this );
+			it++;
+			menu->addAction( act );
+		}
+		setMenu( menu );
+	}
+
+	virtual void
+	notify(TxtAction *act) override
+	{
+		setText( act->text() );
+		valChanged();
+	}
+};
+
+class TrigSrcMenu : public MenuButton {
+private:
+	Scope        *scp_;
+	TriggerSource src_;
+
+	vector<QString>
+	mkStrings(Scope *scp)
+	{
+		scp->acq()->getTriggerSrc( &src_, NULL );
+		vector<QString> rv;
+		switch ( src_ ) {
+			case CHA:
+				rv.push_back( "Channel A" );
+				break;
+			case CHB:
+				rv.push_back( "Channel B" );
+				break;
+			default:
+				rv.push_back( "External" );
+				break;
+		}
+		rv.push_back( "Channel A" );
+		rv.push_back( "Channel B" );
+		rv.push_back( "External"  );
+		return rv;	
+	}
+
+public:
+	TrigSrcMenu(Scope *scp, QWidget *parent = NULL)
+	: MenuButton( mkStrings( scp ), parent ),
+	  scp_(scp)
+	{
+	}
+
+	virtual TriggerSource
+	getSrc() {
+		return src_;
+	}
+
+	virtual void
+	notify(TxtAction *act) override
+	{
+		// update cached value
+		const QString &s = act->text();
+		if ( s == "Channel A" ) {
+			src_ = CHA;
+		} else if ( s == "Channel B" ) {
+			src_ = CHB;
+		} else {
+			src_ = EXT;
+		}
+		MenuButton::notify( act );
+	}
+
+	virtual void
+	accept(ValChangedVisitor *v)
+	{
+		v->visit( this );
+	}
+};
+
+class TglButton : public QPushButton, public ValUpdater {
+protected:
+	Scope             *scp_;
+	vector<QString>    lbls_;
+	int                chnl_;
+public:
+	TglButton( Scope *scp, const vector<QString> &lbls, int chnl = 0, QWidget * parent = NULL )
+	: QPushButton( parent ),
+	  scp_  ( scp  ),
+	  lbls_ ( lbls ),
+	  chnl_ ( chnl )
+	{
+		setCheckable  ( true  );
+		setAutoDefault( false );
+		QObject::connect( this, &QPushButton::toggled, this, &TglButton::activated );
+	}
+
+	virtual int channel() const
+	{
+		return chnl_;
+	}
+
+	virtual void
+	setLbl(bool checked)
+	{
+		if ( checked ) {
+			setText( lbls_[0] );
+		} else {
+			setText( lbls_[1] );
+		}
+		setChecked( checked );
+	}
+
+	void
+	activated(bool checked)
+	{
+		setLbl( checked );
+		valChanged();
+	}
+
+	virtual bool getVal(    ) = 0;
+};
+
+class FECTerminationTgl : public TglButton {
+private:
+	std::string         ledName_;
+public:
+
+	FECTerminationTgl( Scope *scp, int channel, QWidget * parent = NULL )
+	: TglButton( scp, vector<QString>( {"50Ohm", "1MOhm" } ), channel, parent ),
+	  ledName_( std::string("Term") + scp->getChannelName( channel )->toStdString() )
+	{
+		bool v = getVal();
+		setLbl( v );
+		scp_->leds()->setVal( ledName_, v );
+	}
+
+	virtual void accept(ValChangedVisitor *v)
+	{
+		v->visit( this );
+	}
+
+	virtual const std::string &
+	ledName() const
+	{
+		return ledName_;
+	}
+
+	virtual bool getVal() override
+	{
+		return scp_->fec()->getTermination( channel() );
+	}
+};
+
+class FECACCouplingTgl : public TglButton {
+public:
+
+	FECACCouplingTgl( Scope *scp, int channel, QWidget * parent = NULL )
+	: TglButton( scp, vector<QString>( {"AC", "DC" } ), channel, parent )
+	{
+		setLbl( getVal() );
+	}
+
+	virtual void accept(ValChangedVisitor *v)
+	{
+		v->visit( this );
+	}
+
+	virtual bool getVal() override
+	{
+		return scp_->fec()->getACMode( channel() );
+	}
+};
+
+class FECAttenuatorTgl : public TglButton {
+public:
+
+	FECAttenuatorTgl( Scope *scp, int channel, QWidget * parent = NULL )
+	: TglButton( scp, vector<QString>( {"-20dB", "0dB" } ), channel, parent )
+	{
+		setLbl( getVal() );
+	}
+
+	virtual void accept(ValChangedVisitor *v)
+	{
+		v->visit( this );
+	}
+
+	virtual bool getVal() override
+	{
+		return scp_->fec()->getAttenuator( channel() );
+	}
+};
+
+class TrigEdgMenu : public MenuButton {
+private:
+	Scope *scp_;
+
+	static vector<QString>
+	mkStrings(Scope *scp)
+	{
+		bool rising;
+		scp->acq()->getTriggerSrc( NULL, &rising );
+		vector<QString> rv;
+		if ( rising ) {
+			rv.push_back( "Rising"  );
+		} else {
+			rv.push_back( "Falling" );
+		}
+		rv.push_back( "Rising"  );
+		rv.push_back( "Falling" );
+		return rv;	
+	}
+	
+public:
+	TrigEdgMenu(Scope *scp, QWidget *parent = NULL)
+	: MenuButton( mkStrings( scp ), parent ),
+	  scp_(scp)
+	{
+	}
+
+	virtual void
+	accept(ValChangedVisitor *v)
+	{
+		v->visit( this );
+	}
+};
+
+
+class TrigAutMenu : public MenuButton {
+private:
+
+	static vector<QString>
+	mkStrings(Scope *scp)
+	{
+		int ms = scp->acq()->getAutoTimeoutMS();
+
+		vector<QString> rv;
+		if ( ms >= 0 ) {
+			rv.push_back( "On"  );
+		} else {
+			rv.push_back( "Off" );
+		}
+		rv.push_back( "On"  );
+		rv.push_back( "Off" );
+		return rv;	
+	}
+	
+public:
+	TrigAutMenu(Scope *scp, QWidget *parent = NULL)
+	: MenuButton( mkStrings( scp ), parent )
+	{
+	}
+
+	virtual void
+	accept(ValChangedVisitor *v)
+	{
+		v->visit( this );
+	}
+
+};
+
+class TrigArmMenu : public MenuButton {
+private:
+	Scope *scp_;
+    bool   single_;
+
+	static vector<QString>
+	mkStrings(Scope *scp)
+	{
+		vector<QString> rv;
+		rv.push_back( "Continuous"  );
+		rv.push_back( "Off" );
+		rv.push_back( "Single"  );
+		rv.push_back( "Continuous"  );
+		return rv;	
+	}
+	
+public:
+	TrigArmMenu(Scope *scp, QWidget *parent = NULL)
+	: MenuButton( mkStrings( scp ), parent ),
+	  scp_(scp)
+	{
+		scp_->clrTrgLED();
+		scp_->postTrgMode( text() );
+	}
+
+	virtual bool
+	single()
+	{
+		return single_;
+	}
+
+	virtual void
+	accept(ValChangedVisitor *v)
+	{
+		v->visit( this );
+	}
+
+	virtual void
+	notify(TxtAction *act) override
+	{
+		single_ = (act->text() == "Single");
+		MenuButton::notify( act );
+	}
+};
+
+class ParamSetError {};
+
+class ParamValidator : public QValidator {
+private:
+	QLineEdit *edt_;
+
+	ParamValidator(const ParamValidator & ) = delete;
+
+	ParamValidator&
+	operator=(const ParamValidator & )      = delete;
+
+public:
+	ParamValidator( QLineEdit *edt, QValidator *parent )
+	: QValidator( parent ),
+	  edt_      ( edt    )
+	{
+		parent->setParent( edt  );
+		edt->setValidator( this );
+		QObject::connect( edt_, &QLineEdit::returnPressed, this, &ParamValidator::setAction );
+		QObject::connect( edt_, &QLineEdit::editingFinished, this, &ParamValidator::getAction );
+	}
+
+	virtual void
+	setAction()
+	{
+		try {
+			set( edt_->text() );
+		} catch ( ParamSetError &e ) {
+			getAction();
+		}
+	}
+
+	virtual void
+	getAction()
+	{
+		QString s;
+		get( s );
+		edt_->setText( s );
+	}
+
+	virtual void
+	get(QString &)       const = 0;
+
+	virtual void
+	set(const QString &)       = 0;
+
+	void
+	fixup(QString &s) const override
+	{
+		get( s );
+	}
+
+	// delegate to associated 'real' validator
+	State
+	validate( QString &s, int &pos ) const override
+	{
+		return static_cast<QValidator *>( parent() )->validate( s, pos );
+	}
+};
+
+class MyVal : public ParamValidator {
+mutable int val;
+QString fmt;
+public:
+	MyVal( QLineEdit *edt )
+	: ParamValidator( edt, new QIntValidator(-10,10) )
+	{
+		val = 5;
+		fmt = "%1";
+		getAction();
+	}
+
+	void get(QString &s) const override
+	{
+		s = fmt.arg(val);
+	}
+
+	void set(const QString &s) override
+	{
+		bool ok;
+		unsigned  v = s.toUInt( &ok );
+		if ( ! ok ) {
+			throw ParamSetError();
+		} else {
+			val = v;
+		}
+	}
+
+};
+
+class TrigLevel : public ParamValidator, public MovableMarker, public ValUpdater, public ValChangedVisitor {
+private:
+	Scope         *scp_;
+	mutable double lvl_;
+	bool           updating_;
+	TriggerSource  src_;
+	
+public:
+	TrigLevel( QLineEdit *edt, Scope *scp )
+	: ParamValidator( edt, new QDoubleValidator(-100.0,100.0, 1) ),
+	  MovableMarker(       ),
+      scp_         ( scp   ),
+	  updating_    ( false )
+	{
+		// propagate to text field
+		scp_->acq()->getTriggerSrc( &src_, NULL );
+		getAction();
+	}
+
+	virtual double
+	levelPercent()
+	{
+		return lvl_;
+	}
+
+	virtual double
+	raw2Volt(double raw)
+	{
+		if ( CHA == src_ || CHB == src_ ) {
+			return scp_->axisVScl( src_ )->linr( raw );
+		} else {
+			return 0.0;
+		}
+	}
+
+	virtual double
+	levelVolt()
+	{
+		return raw2Volt( percent2Raw( lvl_ ) );
+	}
+
+	virtual double
+	getVal() const
+	{
+		return (lvl_ = scp_->acq()->getTriggerLevelPercent() );
+	}
+
+	virtual void
+	setVal(double v)
+	{
+		lvl_ = v;
+		updateMark();
+		valChanged();
+	}
+
+	using MovableMarker::setLabel;
+
+	virtual void
+	setLabel( double ypos )
+	{
+		if ( CHA != src_ && CHB != src_ ) {
+			setLabel( QwtText() );
+		} else {
+			setLabel( QwtText( QString::asprintf( "%5.3lf", raw2Volt( ypos ) ) ) );
+			if ( ypos > 0.0 ) {
+				setLabelAlignment( Qt::AlignBottom );
+			} else {
+				setLabelAlignment( Qt::AlignTop    );
+			}
+		}
+	}
+
+	virtual void
+	setLabel()
+	{
+		setLabel( yValue() );
+	}
+
+	virtual void
+	update( const QPointF & point ) override
+	{
+		setLabel( point.y() );
+		setValue( point.x(), point.y() );
+		lvl_ = raw2Percent( point.y() );
+		updating_ = true;
+		// propagate to text field
+		getAction();
+	}
+
+	virtual double raw2Percent( double raw )
+	{
+		return 100.0 * raw / getRawScale();
+	}
+
+	virtual double percent2Raw( double per )
+	{
+		return per / 100.0 * getRawScale();
+	}
+
+	virtual void
+	updateDone() override
+	{
+		updating_ = false;
+        // propagate to text field
+		getAction();
+		valChanged();
+	}
+
+	virtual void get(QString &s) const override
+	{
+		if ( updating_ ) {
+			s = QString::asprintf( "%.0lf", lvl_ );
+		} else {
+			s = QString::asprintf("%.0f", getVal());
+		}
+	}
+
+	virtual void set(const QString &s) override
+	{
+		setVal( s.toDouble() );
+	}
+
+	virtual double
+	getRawScale()
+	{
+		return scp_->getZoom()->zoomBase().bottom();
+	}
+
+	virtual void
+	updateMark()
+	{
+		setValue( 0.0, percent2Raw( lvl_ ) );
+	}
+
+	virtual void
+	attach( QwtPlot *plot )
+	{
+		MovableMarker::attach( plot );
+		updateMark();
+	}
+
+	virtual void
+	visit( TrigSrcMenu *mnu ) override
+	{
+		switch ( (src_ = mnu->getSrc()) ) {
+			case CHA:
+				setVisible( true );
+				break;
+			case CHB:
+				setVisible( true );
+				break;
+			default:
+				setVisible( false );
+				break;
+		}
+		// upate label for new source
+		setLabel();
+	}
+
+	virtual void accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+
+};
+
+class IntParamValidator : public ParamValidator {
+protected:
+	Scope *scp_;
+public:
+	IntParamValidator( QLineEdit *edt, Scope *scp, int min, int max )
+	: ParamValidator( edt, new QIntValidator(min, max) ),
+	  scp_(scp)
+	{
+	}
+
+	virtual int getVal() const = 0;
+	virtual void setVal(int)   = 0;
+
+	virtual void get(QString &s) const override
+	{
+		s = QString::asprintf("%d", getVal());
+	}
+
+	virtual void set(const QString &s) override
+	{
+		unsigned n = s.toUInt();
+		setVal( n );
+	}
+};
+
+class NPreTriggerSamples : public IntParamValidator {
+public:
+	NPreTriggerSamples( QLineEdit *edt, Scope *scp )
+	: IntParamValidator( edt, scp, 0, scp->getNSamples() - 1 )
+	{
+		if ( getVal() >= scp->getNSamples() ) {
+			setVal( 0 );
+		}
+		getAction();
+	}
+
+	virtual int
+	getVal() const override
+	{
+		return scp_->acq()->getNPreTriggerSamples();
+	}
+
+	virtual void
+	setVal(int n) override
+	{
+		scp_->acq()->setNPreTriggerSamples( n );
+		scp_->updateNPreTriggerSamples( n );
+	}
+
+};
+
+class Decimation : public IntParamValidator {
+public:
+	Decimation( QLineEdit *edt, Scope *scp )
+	: IntParamValidator( edt, scp, 1, 16*(1<<12) )
+	{
+		getAction();
+	}
+
+	virtual int
+	getVal() const override
+	{
+		return scp_->getDecimation();
+	}
+
+	virtual void
+	setVal(int n) override
+	{
+		scp_->setDecimation( n );
+	}
+};
+
+class LabeledSlider : public QSlider, public ValUpdater {
+protected:
+	QLabel  *lbl_;
+	QString  unit_;
+public:
+	LabeledSlider( QLabel *lbl, const QString &unit, Qt::Orientation orient, QWidget *parent = NULL )
+	: QSlider( orient, parent ),
+	  lbl_ ( lbl  ),
+	  unit_( unit )
+	{
+		QObject::connect( this, &QSlider::valueChanged, this, &LabeledSlider::update );
+	}
+
+	void
+	update(int val)
+	{
+		lbl_->setText( QString::asprintf("%d", val) + unit_ );	
+		valChanged();
+	}
+};
+
+class AttenuatorSlider : public LabeledSlider {
+private:
+	int channel_;
+public:
+	AttenuatorSlider( Scope *scp, int channel, QLabel *lbl, Qt::Orientation orient, QWidget *parent = NULL )
+	: LabeledSlider( lbl, "dB", orient, parent ),
+	  channel_( channel )
+	{
+		int  min, max;
+		scp->pga()->getDBRange( &min, &max );
+		setMinimum( min );
+		setMaximum( max );
+		int att = roundf( scp->pga()->getDBAtt( channel_ ) );
+		update( att );
+		setValue( att );
+	}
+
+	virtual void accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+
+	int
+	channel() const
+	{
+		return channel_;
+	}
+
 };
 
 class ScopeSclEng : public QwtLinearScaleEngine {
@@ -1300,6 +1379,78 @@ ScaleXfrm::smlfmt_ = vector<const char *>({
 		"n%s",
 		"p%s"
 	});
+
+class ParamUpdateVisitor : public ValChangedVisitor {
+	Scope *scp_;
+public:
+	ParamUpdateVisitor(Scope *scp)
+	: scp_( scp )
+	{
+	}
+
+	virtual void visit( TrigSrcMenu *mnu ) override
+	{
+		TriggerSource src;
+		bool          rising;
+		scp_->acq()->getTriggerSrc( &src, &rising );
+
+		src = mnu->getSrc();
+
+		scp_->acq()->setTriggerSrc( src, rising );
+	}
+
+	virtual void visit( TrigEdgMenu *mnu ) override
+	{
+		TriggerSource src;
+		bool          rising;
+		scp_->acq()->getTriggerSrc( &src, &rising );
+
+		const QString &s = mnu->text();
+		rising = (s == "Rising");
+		scp_->acq()->setTriggerSrc( src, rising );
+	}
+
+	virtual void visit( TrigAutMenu *mnu ) override
+	{
+		const QString &s = mnu->text();
+		int ms = (s == "On") ? 100 : -1;
+		scp_->acq()->setAutoTimeoutMS( ms );
+	}
+
+	virtual void visit( TrigArmMenu *mnu ) override
+	{
+		scp_->clrTrgLED();
+		scp_->postTrgMode( mnu->text() );
+	}
+
+	virtual void visit(AttenuatorSlider *sl) override
+	{
+		scp_->pga()->setDBAtt( sl->channel(), sl->value() );
+		scp_->updateVScale( sl->channel() );
+	}
+
+	virtual void visit(FECTerminationTgl *tgl) override
+	{
+		scp_->fec()->setTermination( tgl->channel(), tgl->isChecked() );
+		scp_->leds()->setVal( tgl->ledName(), tgl->isChecked() );
+	}
+	virtual void visit(FECAttenuatorTgl *tgl)
+	{
+		scp_->fec()->setAttenuator( tgl->channel(), tgl->isChecked() );
+		scp_->updateVScale( tgl->channel() );
+	}
+
+	virtual void visit(FECACCouplingTgl *tgl)
+	{
+		scp_->fec()->setACMode( tgl->channel(), tgl->isChecked() );
+	}
+
+	virtual void visit(TrigLevel *lvl)
+	{
+		scp_->acq()->setTriggerLevelPercent( lvl->levelPercent() );
+	}
+
+};
 
 
 Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
@@ -1424,11 +1575,13 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto editWid  = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	trigLvl_      = new TrigLevel( editWid.get(), this );
 	formLay->addRow( new QLabel( "Trigger Level [%]" ), editWid.release() );
+	trigLvl_->subscribe( paramUpd_ );
 
     MenuButton *mnu;
 
 	mnu           = new TrigSrcMenu( this );
 	mnu->subscribe( paramUpd_ );
+    mnu->subscribe( trigLvl_  );
 	formLay->addRow( new QLabel( "Trigger Source"    ), mnu );
 
 	mnu           = new TrigEdgMenu( this );
@@ -1473,13 +1626,19 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	for ( int ch = 0; ch < vChannelNames_.size(); ch++ ) {
 		vector< unique_ptr< QWidget > > v;
 		try {
-			v.push_back( unique_ptr< QWidget >( new FECTerminationTgl( this, ch ) ) ); 
+			auto w = new FECTerminationTgl( this, ch );
+			v.push_back( unique_ptr< FECTerminationTgl >( w ) );
+			w->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) { printf("FEC Caught\n"); }
 		try {
-			v.push_back( unique_ptr< QWidget >( new FECACCouplingTgl( this, ch ) ) ); 
+			auto w = new FECACCouplingTgl( this, ch );
+			v.push_back( unique_ptr< QWidget >( w ) );
+			w->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) {}
 		try {
-			v.push_back( unique_ptr< QWidget >( new FECAttenuatorTgl( this, ch ) ) ); 
+			auto w = new FECAttenuatorTgl( this, ch );
+			v.push_back( unique_ptr< QWidget >( w ) );
+			w->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) {}
 		if ( v.size() > 0 ) {
 			if ( ! hasTitle ) {
@@ -1582,6 +1741,8 @@ Scope::mkGainControls( int channel, QColor &color )
 
 	auto rv   = std::pair<unique_ptr<QHBoxLayout>, QWidget *>();
 	rv.second = ovr.get();
+
+	sld->subscribe( paramUpd_ );
 
 	hLay->addWidget( ovr.release() );
 	hLay->addWidget( sld.release() );
@@ -1707,24 +1868,6 @@ Scope::updateVScale(int ch)
 	}
 	double scl = getVoltScale( ch ) * exp10(att/20.0);
 	vAxisVScl_[ch]->setScale( scl );
-}
-
-void
-Scope::updateLevelMarker( TriggerSource src )
-{
-	switch ( src ) {
-		case CHA:
-			picker_->setAxis( plot_->xBottom, plot_->yLeft  );
-			trigLvl_->setVisible( true );
-			break;
-		case CHB:
-			picker_->setAxis( plot_->xBottom, plot_->yRight );
-			trigLvl_->setVisible( true );
-			break;
-		default:
-			trigLvl_->setVisible( false );
-			break;
-	}
 }
 
 void
