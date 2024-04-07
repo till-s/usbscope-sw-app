@@ -300,20 +300,26 @@ class FECTerminationTgl;
 class FECAttenuatorTgl;
 class FECACCouplingTgl;
 class ScaleXfrm;
+class MeasMarker;
+class NPreTriggerSamples;
+class Decimation;
 
 class ValChangedVisitor
 {
 public:
-	virtual void visit( TrigSrcMenu *)      {}
-	virtual void visit( TrigEdgMenu *)      {}
-	virtual void visit( TrigAutMenu *)      {}
-	virtual void visit( TrigArmMenu *)      {}
-	virtual void visit( TrigLevel   *)      {}
-	virtual void visit(AttenuatorSlider *)  {}
-	virtual void visit(FECTerminationTgl *) {}
-	virtual void visit(FECAttenuatorTgl *)  {}
-	virtual void visit(FECACCouplingTgl *)  {}
-	virtual void visit(ScaleXfrm        *)  {}
+	virtual void visit(TrigSrcMenu        *) {}
+	virtual void visit(TrigEdgMenu        *) {}
+	virtual void visit(TrigAutMenu        *) {}
+	virtual void visit(TrigArmMenu        *) {}
+	virtual void visit(TrigLevel          *) {}
+	virtual void visit(AttenuatorSlider   *) {}
+	virtual void visit(FECTerminationTgl  *) {}
+	virtual void visit(FECAttenuatorTgl   *) {}
+	virtual void visit(FECACCouplingTgl   *) {}
+	virtual void visit(ScaleXfrm          *) {}
+	virtual void visit(MeasMarker         *) {}
+	virtual void visit(NPreTriggerSamples *) {}
+	virtual void visit(Decimation         *) {}
 };
 
 template <typename T>
@@ -575,7 +581,6 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 		printf( "setRect (%s): l->r %f -> %f\n", unit_.toStdString().c_str(), r.left(), r.right() );
 	}
 };
-
 
 class TxtAction;
 
@@ -1017,61 +1022,162 @@ public:
 			val = v;
 		}
 	}
+};
+
+class MeasMarker : public MovableMarker, public ValUpdater, public ValChangedVisitor {
+	Scope *scp_;
+public:
+	MeasMarker(Scope *scp)
+	: scp_( scp )
+	{
+		setLineStyle( QwtPlotMarker::VLine );
+	}
+
+	using MovableMarker::setLabel;
+
+	virtual void setLabel( double xpos )
+	{
+		setLabel( QwtText( QString::asprintf( "%5.3lf", scp_->axisHScl()->linr( xpos ) ) ) );
+	}
+
+	virtual void setLabel()
+	{
+		setLabel( xValue() );
+	}
+
+	virtual void update( const QPointF & point ) override
+	{
+		setLabel( point.x() );
+		if ( point.x() > scp_->axisHScl()->rawScale()/2.0 ) {
+			setLabelAlignment( Qt::AlignLeft );
+		} else {
+			setLabelAlignment( Qt::AlignRight );
+		}
+	}
+
+	virtual void updateDone() override
+	{
+		valChanged();
+	}
+
+	virtual void accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+
+	// decimation and npts changes also end up here :-)
+	virtual void visit(ScaleXfrm *xfrm) override
+	{
+		setLabel();
+	}
+};
+
+class Measurement {
+	Scope      *scp_;
+	MeasMarker *markLeft_;
+	MeasMarker *markRight_;
+public:
 
 };
 
 class TrigLevel : public ParamValidator, public MovableMarker, public ValUpdater, public ValChangedVisitor {
 private:
 	Scope         *scp_;
-	mutable double lvl_;
-	bool           updating_;
+	double         lvl_;
+	double         vlt_;
 	TriggerSource  src_;
+
+	static QString unitOff_;
 	
 public:
 	TrigLevel( QLineEdit *edt, Scope *scp )
 	: ParamValidator( edt, new QDoubleValidator(-100.0,100.0, 1) ),
 	  MovableMarker(       ),
-      scp_         ( scp   ),
-	  updating_    ( false )
+      scp_         ( scp   )
 	{
-		// propagate to text field
+		setLineStyle( QwtPlotMarker::HLine );
 		scp_->acq()->getTriggerSrc( &src_, NULL );
+		lvl_ = scp_->acq()->getTriggerLevelPercent();
+		// hold un-normalized volts
+        vlt_ = raw2Volt( percent2Raw( lvl_ ), false );
+		// propagate to text field
+		updateMark();
+		setLabel();
 		getAction();
 	}
 
 	virtual double
-	levelPercent()
+	levelPercent() const
 	{
 		return lvl_;
 	}
 
 	virtual double
-	raw2Volt(double raw)
+	getVoltNorm() const
 	{
 		if ( CHA == src_ || CHB == src_ ) {
-			return scp_->axisVScl( src_ )->linr( raw );
+			return scp_->axisVScl( src_ )->normScale();
+		}
+		return 1.0;
+	}
+
+	virtual const QString *
+	getUnit() const
+	{
+		if ( CHA == src_ || CHB == src_ ) {
+			return scp_->axisVScl( src_ )->getUnit();
+		}
+		return &unitOff_;
+	}
+
+	virtual double raw2Percent( double raw ) const
+	{
+		return 100.0 * raw / getRawScale();
+	}
+
+	virtual double percent2Raw( double per ) const
+	{
+		return per / 100.0 * getRawScale();
+	}
+
+	virtual double
+	raw2Volt(double raw, bool normalize = true) const
+	{
+		if ( CHA == src_ || CHB == src_ ) {
+			return scp_->axisVScl( src_ )->linr( raw, normalize );
 		} else {
 			return 0.0;
 		}
 	}
 
 	virtual double
-	levelVolt()
+	volt2Raw(double vlt, bool normalize = true) const
 	{
-		return raw2Volt( percent2Raw( lvl_ ) );
+		if ( CHA == src_ || CHB == src_ ) {
+			return scp_->axisVScl( src_ )->linv( vlt, normalize );
+		} else {
+			return 0.0;
+		}
 	}
+
 
 	virtual double
 	getVal() const
 	{
-		return (lvl_ = scp_->acq()->getTriggerLevelPercent() );
+		// return normalized volts for the GUI
+        return raw2Volt( percent2Raw( lvl_ ) );
 	}
 
 	virtual void
 	setVal(double v)
 	{
-		lvl_ = v;
+		// we get normalized volts from the GUI; store as percentage level
+		double nrm;
+		lvl_ = raw2Percent( volt2Raw( v ) );
+		// convert to un-normalized volts
+		vlt_ = v/getVoltNorm();
 		updateMark();
+		setLabel();
 		valChanged();
 	}
 
@@ -1101,28 +1207,18 @@ public:
 	virtual void
 	update( const QPointF & point ) override
 	{
+		// store absolute volts and percentage
+        vlt_ = raw2Volt( point.y() , false );
+		lvl_ = raw2Percent( point.y() );
 		setLabel( point.y() );
 		setValue( point.x(), point.y() );
-		lvl_ = raw2Percent( point.y() );
-		updating_ = true;
 		// propagate to text field
 		getAction();
-	}
-
-	virtual double raw2Percent( double raw )
-	{
-		return 100.0 * raw / getRawScale();
-	}
-
-	virtual double percent2Raw( double per )
-	{
-		return per / 100.0 * getRawScale();
 	}
 
 	virtual void
 	updateDone() override
 	{
-		updating_ = false;
         // propagate to text field
 		getAction();
 		valChanged();
@@ -1130,11 +1226,7 @@ public:
 
 	virtual void get(QString &s) const override
 	{
-		if ( updating_ ) {
-			s = QString::asprintf( "%.0lf", lvl_ );
-		} else {
-			s = QString::asprintf("%.0f", getVal());
-		}
+		s = QString::asprintf( "%.3lf", raw2Volt( percent2Raw( lvl_ ) ) );
 	}
 
 	virtual void set(const QString &s) override
@@ -1143,7 +1235,7 @@ public:
 	}
 
 	virtual double
-	getRawScale()
+	getRawScale() const
 	{
 		return scp_->getZoom()->zoomBase().bottom();
 	}
@@ -1175,9 +1267,40 @@ public:
 				setVisible( false );
 				break;
 		}
-		// upate label for new source
-		setLabel();
+		recomputePercent();
 	}
+
+	virtual void
+	recomputePercent()
+	{
+		double max = raw2Volt( percent2Raw( 100.0) );
+		double min = raw2Volt( percent2Raw(-100.0) );
+		static_cast<QDoubleValidator *>( parent() )->setRange( min, max );
+		// absolute volts to percent
+		lvl_ = raw2Percent( volt2Raw( vlt_, false ) );
+		if ( lvl_ > 100.0 ) {
+			lvl_ = 100.0;
+			vlt_ = raw2Volt( percent2Raw(100.0), false );
+		}
+		if ( lvl_ < -100.0 ) {
+			lvl_ = -100.0;
+			vlt_ = raw2Volt( percent2Raw(-100.0), false );
+		}
+		updateMark();
+		// update label
+		setLabel();
+		// update text field
+		getAction();
+		// percentage value changed; propagate to FW
+		valChanged();
+	}
+
+	virtual void
+	visit( ScaleXfrm *xfrm ) override
+	{
+		recomputePercent();
+	}
+
 
 	virtual void accept(ValChangedVisitor *v) override
 	{
@@ -1186,9 +1309,28 @@ public:
 
 };
 
-class IntParamValidator : public ParamValidator {
+QString TrigLevel::unitOff_( "<off>" );
+
+class TrigLevelLbl : public QLabel, public ValChangedVisitor {
+public:
+	TrigLevelLbl( TrigLevel *lvl, const QString &lbl = QString(), QWidget *parent = NULL )
+	: QLabel( lbl, parent )
+	{
+		visit( lvl );
+	}
+
+	virtual void visit(TrigLevel *lvl) override
+	{
+		setText( QString("Trigger Level [%1]").arg( *lvl->getUnit() ) );
+	}
+};
+
+
+
+class IntParamValidator : public ParamValidator, public ValUpdater {
 protected:
 	Scope *scp_;
+	int    val_;
 public:
 	IntParamValidator( QLineEdit *edt, Scope *scp, int min, int max )
 	: ParamValidator( edt, new QIntValidator(min, max) ),
@@ -1196,8 +1338,17 @@ public:
 	{
 	}
 
+	virtual int getInt() const
+	{
+		return val_;
+	}
+
 	virtual int getVal() const = 0;
-	virtual void setVal(int)   = 0;
+
+	virtual void setVal()
+	{
+		// default does nothing
+	}
 
 	virtual void get(QString &s) const override
 	{
@@ -1207,7 +1358,9 @@ public:
 	virtual void set(const QString &s) override
 	{
 		unsigned n = s.toUInt();
-		setVal( n );
+		val_ = n;
+		setVal();
+		valChanged();
 	}
 };
 
@@ -1216,8 +1369,9 @@ public:
 	NPreTriggerSamples( QLineEdit *edt, Scope *scp )
 	: IntParamValidator( edt, scp, 0, scp->getNSamples() - 1 )
 	{
-		if ( getVal() >= scp->getNSamples() ) {
-			setVal( 0 );
+		if ( (val_ = getVal()) >= scp->getNSamples() ) {
+			val_ = 0;
+			setVal();
 		}
 		getAction();
 	}
@@ -1228,13 +1382,10 @@ public:
 		return scp_->acq()->getNPreTriggerSamples();
 	}
 
-	virtual void
-	setVal(int n) override
+	virtual void accept(ValChangedVisitor *v) override
 	{
-		scp_->acq()->setNPreTriggerSamples( n );
-		scp_->updateNPreTriggerSamples( n );
+		v->visit( this );
 	}
-
 };
 
 class Decimation : public IntParamValidator {
@@ -1242,6 +1393,7 @@ public:
 	Decimation( QLineEdit *edt, Scope *scp )
 	: IntParamValidator( edt, scp, 1, 16*(1<<12) )
 	{
+		val_ = getVal();
 		getAction();
 	}
 
@@ -1251,10 +1403,9 @@ public:
 		return scp_->getDecimation();
 	}
 
-	virtual void
-	setVal(int n) override
+	virtual void accept(ValChangedVisitor *v) override
 	{
-		scp_->setDecimation( n );
+		v->visit( this );
 	}
 };
 
@@ -1434,22 +1585,33 @@ public:
 		scp_->fec()->setTermination( tgl->channel(), tgl->isChecked() );
 		scp_->leds()->setVal( tgl->ledName(), tgl->isChecked() );
 	}
-	virtual void visit(FECAttenuatorTgl *tgl)
+	virtual void visit(FECAttenuatorTgl *tgl) override
 	{
 		scp_->fec()->setAttenuator( tgl->channel(), tgl->isChecked() );
 		scp_->updateVScale( tgl->channel() );
 	}
 
-	virtual void visit(FECACCouplingTgl *tgl)
+	virtual void visit(FECACCouplingTgl *tgl) override
 	{
 		scp_->fec()->setACMode( tgl->channel(), tgl->isChecked() );
 	}
 
-	virtual void visit(TrigLevel *lvl)
+	virtual void visit(TrigLevel *lvl) override
 	{
 		scp_->acq()->setTriggerLevelPercent( lvl->levelPercent() );
 	}
 
+	virtual void visit(NPreTriggerSamples *npts) override
+	{
+		int val = npts->getInt();
+		scp_->acq()->setNPreTriggerSamples( val );
+		scp_->updateNPreTriggerSamples( val );
+	}
+
+	virtual void visit(Decimation *decm) override
+	{
+		scp_->setDecimation( decm->getInt() );
+	}
 };
 
 
@@ -1524,6 +1686,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto sclDrw   = unique_ptr<ScaleXfrm>( new ScaleXfrm( true, "V", this ) );
 	sclDrw->setRawScale( vYScale_[CHA_IDX] );
 	vAxisVScl_[CHA_IDX] = sclDrw.get();
+	updateVScale( CHA_IDX );
 	plot_->setAxisScaleDraw( QwtPlot::yLeft, sclDrw.get() );
 	sclDrw->setParent( plot_ );
 	sclDrw.release();
@@ -1532,6 +1695,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( true, "V", this ) );
 	sclDrw->setRawScale( vYScale_[CHB_IDX] );
 	vAxisVScl_[CHB_IDX] = sclDrw.get();
+	updateVScale( CHB_IDX );
 	plot_->setAxisScaleDraw( QwtPlot::yRight, sclDrw.get() );
 	sclDrw->setParent( plot_ );
 	sclDrw.release();
@@ -1574,8 +1738,15 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
 	auto editWid  = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	trigLvl_      = new TrigLevel( editWid.get(), this );
-	formLay->addRow( new QLabel( "Trigger Level [%]" ), editWid.release() );
+
+	auto trigLvlLbl = unique_ptr<TrigLevelLbl>( new TrigLevelLbl( trigLvl_ ) );
+	trigLvl_->subscribe( trigLvlLbl.get() );
+	formLay->addRow( trigLvlLbl.release(), editWid.release() );
+
 	trigLvl_->subscribe( paramUpd_ );
+	for ( auto it = vAxisVScl_.begin(); it != vAxisVScl_.end(); ++it ) {
+		(*it)->subscribe( trigLvl_ );
+	}
 
     MenuButton *mnu;
 
@@ -1599,6 +1770,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	editWid       = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	auto npts     = new NPreTriggerSamples( editWid.get(), this );
 	cmd_.npts_    = npts->getVal();
+	npts->subscribe( paramUpd_ );
 	formLay->addRow( new QLabel( "Trigger Sample #"  ), editWid.release() );
 
 	unsigned cic0, cic1;
@@ -1608,7 +1780,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	updateHScale();
 
 	editWid       = unique_ptr<QLineEdit>  ( new QLineEdit()   );
-	new Decimation( editWid.get(), this );
+	auto decm     = new Decimation( editWid.get(), this );
+	decm->subscribe( paramUpd_ );
 	formLay->addRow( new QLabel( "Decimation"        ), editWid.release() );
 
 	formLay->addRow( new QLabel( "ADC Clock Freq."   ), new QLabel( QString::asprintf( "%10.3e", getADCClkFreq() ) ) );
@@ -1668,7 +1841,6 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	auto vertLay  = unique_ptr<QVBoxLayout>( new QVBoxLayout() );
 
-	trigLvl_->setLineStyle( QwtPlotMarker::HLine );
 	trigLvl_->attach( plot_ );
 	vMarkers.push_back( trigLvl_ );
 
@@ -1691,6 +1863,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 //	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( vAxisVScl_[CHA_IDX] ) );
 //	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( vAxisVScl_[CHB_IDX] ) );
 //	plot_->setAxisScaleEngine( QwtPlot::xBottom, new ScopeSclEng( axisHScl_     ) );
+
+	updateHScale();
 
     paramUpd.release();
 	xRange.release();
