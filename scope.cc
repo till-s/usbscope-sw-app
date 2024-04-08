@@ -88,6 +88,7 @@ class TrigArmMenu;
 class ScopeZoomer;
 class TrigLevel;
 class ParamUpdateVisitor;
+class MeasMarker;
 
 class ScaleXfrm;
 
@@ -104,10 +105,13 @@ private:
 	unsigned                              decimation_;
 	vector<QWidget*>                      vOverRange_;
 	vector<QColor>                        vChannelColors_;
+	vector<QString>                       vChannelStyles_;
 	vector<QString>                       vChannelNames_;
 	vector<string>                        vOvrLEDNames_;
 	vector<QLabel*>                       vMeanLbls_;
 	vector<QLabel*>                       vStdLbls_;
+	vector<QLabel*>                       vMeasLbls_;
+	vector<MeasMarker*>                   vMeasMark_;
 	vector<QwtPlotCurve*>                 vPltCurv_;
 	shared_ptr<MessageDialog>             msgDialog_;
 	QwtPlot                              *plot_;
@@ -132,6 +136,9 @@ private:
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
+
+	unique_ptr<QHBoxLayout>
+	mkMeasRow(vector<QLabel *> *pv, MeasMarker *mrk = NULL);
 
 public:
 
@@ -295,6 +302,9 @@ public:
 
 	virtual void
 	updateScale( ScaleXfrm * );
+
+	QString
+	smpl2String(int channel, int idx);
 };
 
 class TrigSrcMenu;
@@ -1032,15 +1042,29 @@ public:
 };
 
 class MeasMarker : public MovableMarker, public ValUpdater, public ValChangedVisitor {
-	Scope *scp_;
-	QColor color_;
+	Scope   *scp_;
+	QColor  color_;
+	QString style_;
 public:
 	MeasMarker(Scope *scp, const QColor &color = QColor())
 	: scp_  ( scp   ),
-	  color_( color )
+	  color_( color ),
+	  style_( QString( "color: %1").arg( color_.name() ) )
 	{
 		setLineStyle( QwtPlotMarker::VLine );
 		setLinePen  ( color_               );
+	}
+
+	const QColor &
+	getColor() const
+	{
+		return color_;
+	}
+
+	const QString &
+	getStyleSheet() const
+	{
+		return style_;
 	}
 
 	using MovableMarker::setLabel;
@@ -1080,11 +1104,11 @@ public:
 			setLabelAlignment( Qt::AlignRight );
 		}
 		setValue( point );
+		valChanged();
 	}
 
 	virtual void updateDone() override
 	{
-		valChanged();
 	}
 
 	virtual void accept(ValChangedVisitor *v) override
@@ -1098,6 +1122,25 @@ public:
 		setLabel();
 	}
 };
+
+class MeasLbl : public QLabel, public ValChangedVisitor {
+private:
+	Scope *scp_;
+	int    ch_;
+public:
+	MeasLbl( Scope *scp, int channel, const QString &lbl = QString(), QWidget *parent = NULL )
+	: QLabel( lbl, parent ),
+	  scp_  ( scp         ),
+	  ch_   ( channel     )
+	{
+	}
+
+	virtual void visit(MeasMarker *mrk) override
+	{
+		setText( scp_->smpl2String( ch_, mrk->xValue() ) );
+	}
+};
+
 
 class Measurement {
 	Scope      *scp_;
@@ -1810,12 +1853,14 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	vChannelNames_.push_back( "A" );
 	vChannelNames_.push_back( "B" );
 
-	auto it = vChannelNames_.begin();
-	while ( it != vChannelNames_.end() ) {
+	for ( auto it = vChannelNames_.begin();  it != vChannelNames_.end(); ++it ) {
 		vOvrLEDNames_.push_back( string("OVR") + it->toStdString() );
 		vYScale_.push_back     ( acq_.getBufSampleSize() > 1 ? 32767.0 : 127.0 );
 		vAxisVScl_.push_back   ( NULL );
-		++it;
+	}
+
+	for ( auto it = vChannelColors_.begin(); it != vChannelColors_.end(); ++it ) {
+		vChannelStyles_.push_back( QString("color: %1").arg( it->name() ) );
 	}
 
 	auto mainWid  = unique_ptr<QMainWindow>( new QMainWindow() );
@@ -1988,25 +2033,56 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 			formLay->addRow( hbx.release() );
 		}
 	}
+    auto meas1 = new MeasMarker( this, QColor( Qt::green ) );
+    meas1->attach( plot_ );
+	vMeasMark_.push_back( meas1 );
+	vMarkers.push_back( meas1 );
 
 	formLay->addRow( new QLabel( "Measurements:" ) );
-	for ( int ch = 0; ch < vChannelNames_.size(); ch++ ) {
-		auto lbl = unique_ptr<QLabel>( new QLabel() );
-		lbl->setStyleSheet( QString("color: %1; qproperty-alignment: AlignRight").arg( vChannelColors_[ch].name() ) );
-		vMeanLbls_.push_back( lbl.get() );
-		formLay->addRow( new QLabel( QString( "Avg %1" ).arg( *getChannelName(ch) ) ), lbl.release() );
-
-		lbl = unique_ptr<QLabel>( new QLabel() );
-		lbl->setStyleSheet( QString("color: %1; qproperty-alignment: AlignRight").arg( vChannelColors_[ch].name() ) );
-		vStdLbls_.push_back( lbl.get() );
-		formLay->addRow( new QLabel( QString( "RMS %1" ).arg( *getChannelName(ch) ) ), lbl.release() );
+	for (auto i = 0; i < vMeasMark_.size(); ++i ) {
+		auto tit = unique_ptr<QLabel>( new QLabel( QString( "Meas%1" ).arg(i) ) );
+		tit->setStyleSheet( vMeasMark_[i]->getStyleSheet() );
+		formLay->addRow( tit.release(), mkMeasRow( &vMeasLbls_, vMeasMark_[i] ).release() );
 	}
+	formLay->addRow( new QLabel( "Avg"   ), mkMeasRow( &vMeanLbls_ ).release() );
+	formLay->addRow( new QLabel( "RMS"   ), mkMeasRow( &vStdLbls_  ).release() );
+
+#if 0
+	for ( int ch = 0; ch < vChannelNames_.size(); ch++ ) {
+		auto tit   = unique_ptr<QLabel>( new QLabel() );
+		auto lbl   = unique_ptr<QLabel>( new QLabel() );
+		auto style = QString("color: %1").arg( vChannelColors_[ch].name() );
+		auto chn   = unique_ptr<QLabel>( new QLabel() );
+		auto hlay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
+		lbl->setStyleSheet( style );
+		chn->setStyleSheet( style );
+		tit->setText( QString( "Avg" ) );
+		chn->setText( QString( *getChannelName(ch) ) );
+		lbl->setAlignment( Qt::AlignRight );
+		vMeanLbls_.push_back( lbl.get() );
+		hlay->addWidget( chn.release() );
+		hlay->addWidget( lbl.release() );
+		formLay->addRow( tit.release(), hlay.release() );
+
+		lbl  = unique_ptr<QLabel>( new QLabel() );
+		tit  = unique_ptr<QLabel>( new QLabel() );
+		chn  = unique_ptr<QLabel>( new QLabel() );
+		hlay = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
+		lbl->setStyleSheet( style );
+		lbl->setStyleSheet( style );
+		chn->setStyleSheet( style );
+		tit->setText( QString( "RMS" ) );
+		chn->setText( QString( *getChannelName(ch) ) );
+		lbl->setAlignment( Qt::AlignRight );
+		vStdLbls_.push_back( lbl.get() );
+		hlay->addWidget( chn.release() );
+		hlay->addWidget( lbl.release() );
+		formLay->addRow( tit.release(), hlay.release() );
+	}
+#endif
 
 	auto vertLay  = unique_ptr<QVBoxLayout>( new QVBoxLayout() );
 
-    auto meas1 = new MeasMarker( this, QColor( Qt::green ) );
-    meas1->attach( plot_ );
-	vMarkers.push_back( meas1 );
 	trigLvl_->attach( plot_ );
 	vMarkers.push_back( trigLvl_ );
 	npts->attach( plot_ );
@@ -2147,6 +2223,10 @@ Scope::newData(BufPtr buf)
 		}
 	}
 
+	for ( auto it = vMeasMark_.begin(); it != vMeasMark_.end(); ++it ) {
+		(*it)->valChanged();
+	}
+
 	leds_->setVal( "Trig", 1 );
 	lsync_ = buf->getSync();
 
@@ -2241,6 +2321,40 @@ Scope::updateScale( ScaleXfrm *xfrm )
 	plot_->axisWidget( QwtPlot::yRight  )->update();
 	plot_->axisWidget( QwtPlot::xBottom )->update();
 }
+
+QString
+Scope::smpl2String(int channel, int idx)
+{
+	if ( channel < 0 || channel >= vChannelNames_.size() || ! curBuf_  ) {
+		return QString();
+	}
+	if ( idx < 0 ) {
+		idx = 0;
+	} else if ( idx >= nsmpl_ ) {
+		idx = nsmpl_ - 1;
+	}
+	ScaleXfrm *xfrm = vAxisVScl_[channel];
+	printf("smpl2String ch %d, idx %d -> %lg\n", channel, idx, curBuf_->getData(channel)[idx]);
+	return QString::asprintf("%7.2f", xfrm->linr(curBuf_->getData(channel)[idx])) + *xfrm->getUnit();
+}
+
+unique_ptr<QHBoxLayout>
+Scope::mkMeasRow(vector<QLabel *> *pv, MeasMarker *mrk)
+{
+	auto hlay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
+	for ( int ch = 0; ch < vChannelNames_.size(); ch++ ) {
+		auto lbl   = unique_ptr<MeasLbl>( new MeasLbl( this, ch ) );
+		lbl->setStyleSheet( vChannelStyles_[ch] );
+		lbl->setAlignment( Qt::AlignRight );
+		if ( mrk ) {
+			mrk->subscribe( lbl.get() );
+		}
+		pv->push_back( lbl.get() );
+		hlay->addWidget( lbl.release() );
+	}
+	return hlay;
+}
+
 
 int
 main(int argc, char **argv)
