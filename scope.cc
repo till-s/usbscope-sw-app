@@ -159,6 +159,13 @@ public:
 		return axisHScl_;
 	}
 
+	const QColor *
+	getChannelColor(int channel)
+	{
+		if ( channel < 0 || channel >= vChannelNames_.size() )
+			throw std::invalid_argument( "invalid channel idx" );
+		return &vChannelColors_[channel];
+	}
 
 	const QString *
 	getChannelName(int channel)
@@ -1026,18 +1033,23 @@ public:
 
 class MeasMarker : public MovableMarker, public ValUpdater, public ValChangedVisitor {
 	Scope *scp_;
+	QColor color_;
 public:
-	MeasMarker(Scope *scp)
-	: scp_( scp )
+	MeasMarker(Scope *scp, const QColor &color = QColor())
+	: scp_  ( scp   ),
+	  color_( color )
 	{
 		setLineStyle( QwtPlotMarker::VLine );
+		setLinePen  ( color_               );
 	}
 
 	using MovableMarker::setLabel;
 
 	virtual void setLabel( double xpos )
 	{
-		setLabel( QwtText( QString::asprintf( "%5.3lf", scp_->axisHScl()->linr( xpos ) ) ) );
+		auto txt = QwtText( QString::asprintf( "%5.3lf", scp_->axisHScl()->linr( xpos ) ) );
+		txt.setColor( color_ );
+		setLabel( txt );
 	}
 
 	virtual void setLabel()
@@ -1045,14 +1057,29 @@ public:
 		setLabel( xValue() );
 	}
 
+#if 0
+	// trivial override does not work; alignment happens in 'drawLabel'
+	virtual void drawLabel(QPainter *painter, const QRectF &canvasRect, const QPointF &pos) const override
+	{
+		QPointF newPos( pos.x(), here_.y() );
+		MovableMarker::drawLabel(painter, canvasRect, newPos);
+	}
+#endif
+
 	virtual void update( const QPointF & point ) override
 	{
+		MovableMarker::update( point );
 		setLabel( point.x() );
-		if ( point.x() > scp_->axisHScl()->rawScale()/2.0 ) {
+		if        ( point.y() >  scp_->axisVScl( CHA )->rawScale()/3.0 ) {
+			setLabelAlignment( Qt::AlignTop );
+		} else if ( point.y() < -scp_->axisVScl( CHA )->rawScale()/3.0 ) {
+			setLabelAlignment( Qt::AlignBottom );
+		} else if ( point.x() > scp_->axisHScl()->rawScale()/2.0 ) {
 			setLabelAlignment( Qt::AlignLeft );
 		} else {
 			setLabelAlignment( Qt::AlignRight );
 		}
+		setValue( point );
 	}
 
 	virtual void updateDone() override
@@ -1091,7 +1118,7 @@ private:
 	
 public:
 	TrigLevel( QLineEdit *edt, Scope *scp )
-	: ParamValidator( edt, new QDoubleValidator(-100.0,100.0, 1) ),
+	: ParamValidator( edt, new QDoubleValidator(-100.0,100.0,-1) ),
 	  MovableMarker(       ),
       scp_         ( scp   )
 	{
@@ -1184,13 +1211,23 @@ public:
 	using MovableMarker::setLabel;
 
 	virtual void
-	setLabel( double ypos )
+	setLabel( double xpos, double ypos )
 	{
 		if ( CHA != src_ && CHB != src_ ) {
 			setLabel( QwtText() );
 		} else {
-			setLabel( QwtText( QString::asprintf( "%5.3lf", raw2Volt( ypos ) ) ) );
-			if ( ypos > 0.0 ) {
+			auto txt = QwtText( QString::asprintf( "%5.3lf", raw2Volt( ypos ) ) );
+			try {
+				txt.setColor( *scp_->getChannelColor(src_) );
+			} catch (std::invalid_argument &err)
+			{
+			}
+			setLabel( txt );
+			if        ( xpos > scp_->axisHScl()->rawScale()*2.0/3.0 ) {
+				setLabelAlignment( Qt::AlignRight );
+			} else if ( xpos < scp_->axisHScl()->rawScale()/3.0 ) {
+				setLabelAlignment( Qt::AlignLeft );
+			} else if ( ypos > 0.0 ) {
 				setLabelAlignment( Qt::AlignBottom );
 			} else {
 				setLabelAlignment( Qt::AlignTop    );
@@ -1201,7 +1238,7 @@ public:
 	virtual void
 	setLabel()
 	{
-		setLabel( yValue() );
+		setLabel( xValue(), yValue() );
 	}
 
 	virtual void
@@ -1210,7 +1247,7 @@ public:
 		// store absolute volts and percentage
         vlt_ = raw2Volt( point.y() , false );
 		lvl_ = raw2Percent( point.y() );
-		setLabel( point.y() );
+		setLabel( point.x(), point.y() );
 		setValue( point.x(), point.y() );
 		// propagate to text field
 		getAction();
@@ -1325,8 +1362,6 @@ public:
 	}
 };
 
-
-
 class IntParamValidator : public ParamValidator, public ValUpdater {
 protected:
 	Scope *scp_;
@@ -1364,29 +1399,43 @@ public:
 	}
 };
 
-class NPreTriggerSamples : public IntParamValidator {
+class DblParamValidator : public ParamValidator, public ValUpdater {
+protected:
+	Scope *scp_;
+	double val_;
 public:
-	NPreTriggerSamples( QLineEdit *edt, Scope *scp )
-	: IntParamValidator( edt, scp, 0, scp->getNSamples() - 1 )
+	DblParamValidator( QLineEdit *edt, Scope *scp, double min, double max )
+	: ParamValidator( edt, new QDoubleValidator(min, max, -1) ),
+	  scp_(scp)
 	{
-		if ( (val_ = getVal()) >= scp->getNSamples() ) {
-			val_ = 0;
-			setVal();
-		}
-		getAction();
 	}
 
-	virtual int
-	getVal() const override
+	virtual double getDbl() const
 	{
-		return scp_->acq()->getNPreTriggerSamples();
+		return val_;
 	}
 
-	virtual void accept(ValChangedVisitor *v) override
+	virtual double getVal() const = 0;
+
+	virtual void setVal()
 	{
-		v->visit( this );
+		// default does nothing
+	}
+
+	virtual void get(QString &s) const override
+	{
+		s = QString::asprintf("%lf", getVal());
+	}
+
+	virtual void set(const QString &s) override
+	{
+		unsigned n = s.toDouble();
+		val_ = n;
+		setVal();
+		valChanged();
 	}
 };
+
 
 class Decimation : public IntParamValidator {
 public:
@@ -1406,6 +1455,114 @@ public:
 	virtual void accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );
+	}
+};
+
+class NPreTriggerSamples : public DblParamValidator, public MovableMarker, public ValChangedVisitor {
+private:
+	int npts_;
+public:
+	NPreTriggerSamples( QLineEdit *edt, Scope *scp )
+	: DblParamValidator( edt, scp, 0, scp->getNSamples() - 1 ),
+	  MovableMarker    (                                     )
+	{
+		setLineStyle( QwtPlotMarker::VLine );
+		npts_ = scp_->acq()->getNPreTriggerSamples(); 
+		visit( scp_->axisHScl() );
+	}
+
+	virtual double npts2Time(double npts) const
+	{
+		return scp_->axisHScl()->linr( npts );
+	}
+
+	virtual double time2Npts(double t) const
+	{
+		return scp_->axisHScl()->linv( t );
+	}
+
+	virtual const QString *
+	getUnit() const
+	{
+		return scp_->axisHScl()->getUnit();
+	}
+
+	virtual int
+	getNPTS() const
+	{
+		return npts_;
+	}
+
+	virtual double
+	getVal() const override
+	{
+		return val_;
+	}
+
+	virtual void setVal() override
+	{
+/*
+linr:  (npts_-roff)/rscl*scl + off
+linv:  (t - off)*rscl/scl + roff
+*/
+		npts_ = round( scp_->axisHScl()->linv( val_ ) - scp_->axisHScl()->linv( 0 ) );
+		if ( npts_ > scp_->getNSamples() - 1 ) {
+			npts_ = scp_->getNSamples() - 1;
+		} else if ( npts_ < 0 ) {
+			npts_ = 0;
+		}
+	}
+
+	virtual void
+	updateMark()
+	{
+		setValue( npts_, 0.0 );
+	}
+
+	virtual void
+	update( const QPointF & point ) override
+	{
+		// store absolute volts and percentage
+        val_  = scp_->axisHScl()->linr( point.x() );
+		npts_ = round( point.x() );
+		setValue( point.x(), point.y() );
+		// propagate to text field
+		getAction();
+	}
+
+	virtual void
+	updateDone() override
+	{
+		valChanged();
+	}
+
+	virtual void accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+
+	virtual void visit(ScaleXfrm *xfrm) override
+	{
+		double min = 0.0;
+		double max = ( scp_->getNSamples() - 1 )/xfrm->rawScale() * xfrm->scale();
+		// time-offset of sample 0
+        val_       = - xfrm->linr( 0 );
+		getAction();
+		updateMark();
+	}
+};
+
+class TrigDelayLbl : public QLabel, public ValChangedVisitor {
+public:
+	TrigDelayLbl( NPreTriggerSamples *npts, const QString &lbl = QString(), QWidget *parent = NULL )
+	: QLabel( lbl, parent )
+	{
+		visit( npts );
+	}
+
+	virtual void visit(NPreTriggerSamples *npts) override
+	{
+		setText( QString("Trigger Delay [%1]").arg( *npts->getUnit() ) );
 	}
 };
 
@@ -1507,6 +1664,9 @@ public:
 
 		rv.setUpperBound( xfrm_->linv( rv.upperBound() ) );
 		rv.setLowerBound( xfrm_->linv( rv.lowerBound() ) );
+#if 0
+		printf("XFRM Scale Eng: bounds %lf %lf\n", rv.lowerBound(), rv.upperBound());
+#endif
 
 		return rv;
 	}
@@ -1603,7 +1763,7 @@ public:
 
 	virtual void visit(NPreTriggerSamples *npts) override
 	{
-		int val = npts->getInt();
+		int val = npts->getNPTS();
 		scp_->acq()->setNPreTriggerSamples( val );
 		scp_->updateNPreTriggerSamples( val );
 	}
@@ -1705,6 +1865,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( false, "s", this ) );
 	sclDrw->setRawScale( nsmpl_ - 1 );
 	axisHScl_     = sclDrw.get();
+    updateHScale();
+
 	plot_->setAxisScaleDraw( QwtPlot::xBottom, sclDrw.get() );
 	sclDrw->setParent( plot_ );
 	sclDrw.release();
@@ -1771,13 +1933,14 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto npts     = new NPreTriggerSamples( editWid.get(), this );
 	cmd_.npts_    = npts->getVal();
 	npts->subscribe( paramUpd_ );
-	formLay->addRow( new QLabel( "Trigger Sample #"  ), editWid.release() );
+	auto trigDlyLbl = unique_ptr<TrigDelayLbl>( new TrigDelayLbl( npts ) );
+	npts->subscribe( trigDlyLbl.get() );
+	formLay->addRow( trigDlyLbl.release(), editWid.release() );
+	axisHScl_->subscribe( npts );
 
 	unsigned cic0, cic1;
 	acq_.getDecimation( &cic0, &cic1 );
 	cmd_.decm_    = cic0*cic1;
-	// initialize h-Scale based on current decimation
-	updateHScale();
 
 	editWid       = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	auto decm     = new Decimation( editWid.get(), this );
@@ -1841,8 +2004,13 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	auto vertLay  = unique_ptr<QVBoxLayout>( new QVBoxLayout() );
 
+    auto meas1 = new MeasMarker( this, QColor( Qt::green ) );
+    meas1->attach( plot_ );
+	vMarkers.push_back( meas1 );
 	trigLvl_->attach( plot_ );
 	vMarkers.push_back( trigLvl_ );
+	npts->attach( plot_ );
+	vMarkers.push_back( npts     );
 
 	new MovableMarkers( plot_, picker_, vMarkers, plot_ );
 
@@ -1863,8 +2031,6 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 //	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( vAxisVScl_[CHA_IDX] ) );
 //	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( vAxisVScl_[CHB_IDX] ) );
 //	plot_->setAxisScaleEngine( QwtPlot::xBottom, new ScopeSclEng( axisHScl_     ) );
-
-	updateHScale();
 
     paramUpd.release();
 	xRange.release();
@@ -2004,7 +2170,7 @@ void
 Scope::updateNPreTriggerSamples(unsigned npts)
 {
 	cmd_.npts_ = npts;
-	axisHScl_->setRawOffset( npts );
+	updateHScale();
 	postSync();
 }
 
@@ -2026,7 +2192,16 @@ Scope::getZoom()
 void
 Scope::updateHScale()
 {
-	axisHScl_->setScale( nsmpl_ * cmd_.decm_/getADCClkFreq() );
+	unsigned cic0, cic1;
+
+	acq_.getDecimation( &cic0, &cic1 );
+
+	double   decm = cic0*cic1;
+
+	double   npts = acq_.getNPreTriggerSamples();
+
+	axisHScl_->setRawOffset( npts );
+	axisHScl_->setScale( getNSamples() * decm / getADCClkFreq() );
 }
 
 void
