@@ -2334,7 +2334,6 @@ Scope::smpl2String(int channel, int idx)
 		idx = nsmpl_ - 1;
 	}
 	ScaleXfrm *xfrm = vAxisVScl_[channel];
-	printf("smpl2String ch %d, idx %d -> %lg\n", channel, idx, curBuf_->getData(channel)[idx]);
 	return QString::asprintf("%7.2f", xfrm->linr(curBuf_->getData(channel)[idx])) + *xfrm->getUnit();
 }
 
@@ -2359,9 +2358,11 @@ Scope::mkMeasRow(vector<QLabel *> *pv, MeasMarker *mrk)
 int
 main(int argc, char **argv)
 {
-const char *fnam = getenv("FWCOMM_DEVICE");
+const char *fnam     = getenv("FWCOMM_DEVICE");
+bool        sim      = false;
+unsigned    nsamples = 0;
 int         opt;
-bool        sim  = false;
+unsigned   *u_p;
 
 	if ( ! fnam && ! (fnam = getenv("BBCLI_DEVICE")) ) {
 		fnam = "/dev/ttyACM0";
@@ -2369,13 +2370,19 @@ bool        sim  = false;
 
 	QApplication app(argc, argv);
 
-	while ( (opt = getopt( argc, argv, "d:s" )) > 0 ) {
+	while ( (opt = getopt( argc, argv, "d:sn:" )) > 0 ) {
+		u_p = 0;
 		switch ( opt ) {
-			case 'd': fnam = optarg; break;
-			case 's': sim  = true;   break;
+			case 'd': fnam = optarg;     break;
+			case 's': sim  = true;       break;
+			case 'n': u_p  = &nsamples;  break;
 			default:
 				fprintf(stderr, "Error: Unknown option -%c\n", opt);
 				return 1;
+		}
+		if ( u_p && 1 != sscanf( optarg, "%i", u_p ) ) {
+			fprintf(stderr, "Error: unable to scan argument of option -%c\n", opt);
+			return 1;
 		}
 	}
 
@@ -2415,7 +2422,7 @@ bool        sim  = false;
 	printf("running: %d\n", m->isRunning());
 #endif
 #if 1
-	Scope sc( FWComm::create( fnam ), sim, 0 );
+	Scope sc( FWComm::create( fnam ), sim, nsamples );
 
 	sc.startReader();
 
