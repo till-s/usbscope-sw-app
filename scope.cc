@@ -35,6 +35,7 @@
 #include <qwt_plot.h>
 #include <qwt_plot_zoomer.h>
 #include <qwt_plot_picker.h>
+#include <qwt_plot_panner.h>
 #include <qwt_text.h>
 #include <qwt_scale_div.h>
 #include <qwt_scale_map.h>
@@ -117,6 +118,7 @@ private:
 	QwtPlot                              *plot_;
 	ScopeZoomer                          *lzoom_;
 	ScopeZoomer                          *rzoom_;
+	QwtPlotPanner                        *panner_;
 	vector<ScaleXfrm*>                    vAxisVScl_;
 	ScaleXfrm                            *axisHScl_;
 	ScopeReader                          *reader_;
@@ -1895,6 +1897,9 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	rzoom_        = new ScopeZoomer( plot_->xTop, plot_->yRight, plot_->canvas() );
 	rzoom_->setTrackerMode( QwtPicker::AlwaysOff );
 	rzoom_->setRubberBand( QwtPicker::NoRubberBand );
+
+	panner_       = new QwtPlotPanner( plot_->canvas() );
+	panner_->setMouseButton( Qt::LeftButton, Qt::ControlModifier );
 	
 	auto sclDrw   = unique_ptr<ScaleXfrm>( new ScaleXfrm( true, "V", this ) );
 	sclDrw->setRawScale( vYScale_[CHA_IDX] );
