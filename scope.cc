@@ -416,6 +416,40 @@ public:
 			plot()->axisScaleDraw( plot()->yRight)->label( pointf.y() ).text()
 		);
 	}
+
+	virtual void
+	widgetKeyPressEvent( QKeyEvent *ke ) override
+	{
+		if ( ! isActive() ) {
+			for ( auto it = markers_.begin(); it != markers_.end(); ++it ) {
+				if ( (*it).second == ke->key() ) {
+					QWidget *w = plot()->canvas();
+					QPoint   p = w->mapFromGlobal( QCursor::pos() );
+					if ( w->geometry().contains( p ) ) {
+						printf("Contains\n");
+					} else {
+						p.setX( (w->geometry().left() + w->geometry().right())/2 );
+						p.setY( (w->geometry().top() + w->geometry().bottom())/2 );
+					}
+					const QPointF pf( invTransform( p ) );
+					(*it).first->update( pf );
+				}
+			}
+		}
+		QwtPlotZoomer::widgetKeyPressEvent( ke );
+	}
+
+	virtual void
+	attachMarker( MovableMarker *m, int key )
+	{
+		for ( auto it = markers_.begin(); it != markers_.end(); ++it ) {
+			if ( (*it).second == key ) {
+				(*it).first = m;
+				return;
+			}
+		}
+		markers_.push_back( std::pair<MovableMarker*,int>( m, key ) );
+	}
 };
 
 class ScaleXfrm : public QObject, public QwtScaleDraw, public ValUpdater {
@@ -1176,6 +1210,122 @@ public:
 	}
 };
 
+class Measurement : public ValChangedVisitor, public ValUpdater {
+	Scope                 *scp_;
+	std::vector<double>    yVals_;
+	double                 xVal_;
+public:
+	Measurement(Scope *scp)
+	: scp_(scp)
+	{
+		for ( auto ch = 0; ch < scp_->numChannels(); ++ch ) {
+			yVals_.push_back( NAN );
+		}
+	}
+
+	double
+	getX() const
+	{
+		return xVal_;
+	}
+
+	// assume index has been checked
+	double
+	getYUnsafe(unsigned ch) const
+	{
+		return yVals_[ch];
+	}
+
+	double
+	getY(unsigned ch) const
+	{
+		if ( ch >= yVals_.size() ) {
+			throw std::invalid_argument( "invalid channel idx" );
+		}
+		return getYUnsafe( ch );
+	}
+
+
+	Scope *
+	getScope() const
+	{
+		return scp_;
+	}
+
+	virtual void visit(MeasMarker *mrk) override
+	{
+		xVal_ = scp_->axisHScl()->linr( mrk->xValue(), false );
+		for ( auto ch = 0; ch < scp_->numChannels(); ++ch ) {
+			yVals_[ch] = scp_->getSample( ch, round(xVal_), false );
+		}
+		valChanged();
+	}
+
+	virtual void accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+};
+
+class MeasDiff : public ValChangedVisitor, public ValUpdater {
+private:
+	Measurement           measA_;
+	Measurement           measB_;
+	std::vector<double>   diffY_;
+	std::vector<QString*> unitY_;
+	double                diffX_;
+	QString              *unitX_;
+
+public:
+	MeasDiff(MeasMarker *mrkA, MeasMarker *mrkB)
+	: measA_( mrkA->getScope() ), measB_( mrkB->getScope() ), diffX_( NAN ), unitX_( ScaleXfrm::noUnit() )
+	{
+		for ( auto i = 0; i < mrkA->getScope()->numChannels(); ++i ) {
+			diffY_.push_back( NAN );
+			unitY_.push_back( ScaleXfrm::noUnit() );
+		}
+		mrkA->subscribe( &measA_ );
+		mrkB->subscribe( &measB_ );
+		measA_.subscribe( this );
+		measB_.subscribe( this );
+	}
+
+	QString
+	diffXToString() const
+	{
+		return QString::asprintf("%7.2f", diffX_) + *unitX_;
+	}
+
+	QString
+	diffYToString(unsigned ch) const
+	{
+		return QString::asprintf("%7.2f", diffY_[ch]) + *unitY_[ch];
+	}
+
+
+	virtual void visit(Measurement *) override
+	{
+		auto scp = measA_.getScope();
+		diffX_   = measB_.getX() - measA_.getX();
+		auto p   = scp->axisHScl()->normalize( diffX_ );
+		diffX_  *= p.first;
+		unitX_   = p.second;
+
+		for ( auto ch = 0; ch < diffY_.size(); ++ch ) {
+			diffY_[ch] = measB_.getYUnsafe( ch ) - measA_.getYUnsafe( ch );
+			p = scp->axisVScl( ch )->normalize( diffY_[ch] );
+			diffY_[ch] *= p.first;
+			unitY_[ch]  = p.second;
+		}
+		valChanged();
+	}
+
+	virtual void accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+};
+
 class MeasLbl : public QLabel, public ValChangedVisitor {
 private:
 	Scope *scp_;
@@ -1192,15 +1342,15 @@ public:
 	{
 		setText( scp_->smplToString( ch_, mrk->xValue() ) );
 	}
-};
 
-
-class Measurement {
-	Scope      *scp_;
-	MeasMarker *markLeft_;
-	MeasMarker *markRight_;
-public:
-
+	virtual void visit(MeasDiff *md) override
+	{
+		if ( ch_ < 0 ) {
+			setText( md->diffXToString() );
+		} else {
+			setText( md->diffYToString( ch_ ) );
+		}
+	}
 };
 
 class TrigLevel : public ParamValidator, public MovableMarker, public ValUpdater, public ValChangedVisitor {
