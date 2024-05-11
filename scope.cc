@@ -315,8 +315,11 @@ public:
 	virtual void
 	updateScale( ScaleXfrm * );
 
+	double
+	getSample(int channel, int idx, bool decNorm);
+
 	QString
-	smpl2String(int channel, int idx);
+	smplToString(int channel, int idx);
 };
 
 class TrigSrcMenu;
@@ -530,11 +533,43 @@ public:
 		return uptr_;
 	}
 
+	virtual
+	std::pair<double, QString *>
+	normalize(double val, double max)
+	{
+		if ( val > max ) {
+			max = val;
+		}
+		double   uscl = 1.0;
+		QString *uptr = &ubig_[0];
+		int      idx  = 0;
+		if ( max >= 1000.0 ) {
+			val   = 1000.0 / max;
+			while ( ( uscl >= val ) && (++idx < ubig_.size()) ) {
+				uscl /= 1000.0;
+				uptr  = &ubig_[idx];
+			}
+		} else {
+			val   = 1.0 / max;
+			while ( ( uscl <= val ) && (++idx < usml_.size()) ) {
+				uscl *= 1000.0;
+				uptr  = &usml_[idx];
+			}
+		}
+		return std::pair<double, QString*>(uscl, uptr);
+	}
+
+	virtual
+	std::pair<double, QString *>
+	normalize(double val)
+	{
+		return normalize(val, val);
+	}
+
 	virtual void
 	updatePlot()
 	{
 		double max, tmp;
-		int    idx;
 
 		if ( vert_ ) {
 			max = abs( linr( rect_.top()   , false ) );
@@ -545,25 +580,10 @@ printf("vert max %lf, top %lf, bot %lf\n", tmp > max ? tmp : max, rect_.top(), r
 			tmp = abs( linr( rect_.right(),  false ) );
 printf("horz max %lf\n", tmp > max ? tmp : max );
 		}
-		if ( tmp > max ) {
-			max = tmp;
-		}
-		uscl_ = 1.0;
-		uptr_ = &ubig_[0];
-		idx   = 0;
-		if ( max >= 1000.0 ) {
-			tmp   = 1000.0 / max;
-			while ( ( uscl_ >= tmp ) && (++idx < ubig_.size()) ) {
-				uscl_ /= 1000.0;
-				uptr_  = &ubig_[idx];
-			}
-		} else {
-			tmp   = 1.0 / max;
-			while ( ( uscl_ <= tmp ) && (++idx < usml_.size()) ) {
-				uscl_ *= 1000.0;
-				uptr_  = &usml_[idx];
-			}
-		}
+
+		auto nrm = normalize( tmp, max );
+		uscl_ = nrm.first;
+		uptr_ = nrm.second;
 		// does not work
 		// lzoom_->plot()->updateAxes();
 
@@ -1170,7 +1190,7 @@ public:
 
 	virtual void visit(MeasMarker *mrk) override
 	{
-		setText( scp_->smpl2String( ch_, mrk->xValue() ) );
+		setText( scp_->smplToString( ch_, mrk->xValue() ) );
 	}
 };
 
@@ -2367,11 +2387,11 @@ Scope::updateScale( ScaleXfrm *xfrm )
 	plot_->axisWidget( QwtPlot::xBottom )->update();
 }
 
-QString
-Scope::smpl2String(int channel, int idx)
+double
+Scope::getSample(int channel, int idx, bool decNorm)
 {
-	if ( channel < 0 || channel >= vChannelNames_.size() || ! curBuf_  ) {
-		return QString();
+	if ( channel < 0 || channel >= numChannels() || ! curBuf_  ) {
+		return NAN;
 	}
 	if ( idx < 0 ) {
 		idx = 0;
@@ -2379,11 +2399,22 @@ Scope::smpl2String(int channel, int idx)
 		idx = nsmpl_ - 1;
 	}
 	ScaleXfrm *xfrm = vAxisVScl_[channel];
-	return QString::asprintf("%7.2f", xfrm->linr(curBuf_->getData(channel)[idx])) + *xfrm->getUnit();
+	return xfrm->linr(curBuf_->getData(channel)[idx], decNorm);
+}
+
+QString
+Scope::smplToString(int channel, int idx)
+{
+	double v = getSample( channel, idx, true );
+	if ( isnan( v ) ) {
+		return QString();
+	}
+	ScaleXfrm *xfrm = vAxisVScl_[channel];
+	return QString::asprintf("%7.2f", v) + *xfrm->getUnit();
 }
 
 unique_ptr<QHBoxLayout>
-Scope::mkMeasRow(vector<QLabel *> *pv, MeasMarker *mrk)
+Scope::mkMeasRow(vector<QLabel *> *pv, MeasMarker *mrk, MeasDiff *md)
 {
 	auto hlay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
 	for ( int ch = 0; ch < vChannelNames_.size(); ch++ ) {
