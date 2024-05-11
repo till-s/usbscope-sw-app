@@ -181,7 +181,7 @@ public:
 	const QColor *
 	getChannelColor(int channel)
 	{
-		if ( channel < 0 || channel >= vChannelNames_.size() )
+		if ( channel < 0 || channel >= numChannels() )
 			throw std::invalid_argument( "invalid channel idx" );
 		return &vChannelColors_[channel];
 	}
@@ -197,7 +197,7 @@ public:
 	void
 	setVoltScale(int channel, double fullScaleVolts)
 	{
-		if ( channel < 0 || channel >= vChannelNames_.size() )
+		if ( channel < 0 || channel >= numChannels() )
 			throw std::invalid_argument( "invalid channel idx" );
 		Board::setVoltScale(channel, fullScaleVolts);
 		updateVScale( channel );
@@ -2046,7 +2046,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	bool hasTitle = false;
 
-	for ( int ch = 0; ch < vChannelNames_.size(); ch++ ) {
+	for ( int ch = 0; ch < numChannels(); ch++ ) {
 		vector< unique_ptr< QWidget > > v;
 		try {
 			auto w = new FECTerminationTgl( this, ch );
@@ -2090,7 +2090,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	formLay->addRow( new QLabel( "RMS"   ), mkMeasRow( &vStdLbls_  ).release() );
 
 #if 0
-	for ( int ch = 0; ch < vChannelNames_.size(); ch++ ) {
+	for ( int ch = 0; ch < numChannels(); ch++ ) {
 		auto tit   = unique_ptr<QLabel>( new QLabel() );
 		auto lbl   = unique_ptr<QLabel>( new QLabel() );
 		auto style = QString("color: %1").arg( vChannelColors_[ch].name() );
