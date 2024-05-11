@@ -2414,7 +2414,7 @@ Scope::smplToString(int channel, int idx)
 }
 
 unique_ptr<QHBoxLayout>
-Scope::mkMeasRow(vector<QLabel *> *pv, MeasMarker *mrk, MeasDiff *md)
+Scope::mkMeasRow(vector<QLabel *> *pv, MeasMarker *mrk)
 {
 	auto hlay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
 	for ( int ch = 0; ch < vChannelNames_.size(); ch++ ) {
