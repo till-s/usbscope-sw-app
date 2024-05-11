@@ -2249,10 +2249,19 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
     meas1->attach( plot_ );
 	vMeasMark_.push_back( meas1 );
 	vMarkers.push_back( meas1 );
+	lzoom_->attachMarker( meas1, Qt::Key_1 );
+    auto meas2 = new MeasMarker( this, QColor( Qt::magenta ) );
+    meas2->attach( plot_ );
+	vMeasMark_.push_back( meas2 );
+	vMarkers.push_back( meas2 );
+	lzoom_->attachMarker( meas2, Qt::Key_2 );
+
+//	auto measDiff = std::unique_ptr<MeasDiff>( new MeasDiff( meas1, meas2 ) );
+//	vMeasDiff_.push_back( measDiff.get() );
 
 	formLay->addRow( new QLabel( "Measurements:" ) );
 	for (auto i = 0; i < vMeasMark_.size(); ++i ) {
-		auto tit = unique_ptr<QLabel>( new QLabel( QString( "Meas%1" ).arg(i) ) );
+		auto tit = unique_ptr<QLabel>( new QLabel( QString( "Mark%1" ).arg(i) ) );
 		tit->setStyleSheet( vMeasMark_[i]->getStyleSheet() );
 		formLay->addRow( tit.release(), mkMeasRow( &vMeasLbls_, vMeasMark_[i] ).release() );
 	}
