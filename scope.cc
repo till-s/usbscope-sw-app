@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QLineEdit>
 #include <QValidator>
 #include <QPushButton>
@@ -19,6 +20,7 @@
 #include <QFinalState>
 #include <QFuture>
 #include <QFutureWatcher>
+#include <QKeyEvent>
 
 #include <memory>
 #include <stdio.h>
@@ -59,7 +61,7 @@ using std::string;
 class MessageDialog : public QDialog {
 	QLabel *lbl_;
 public:
-	MessageDialog( QWidget *parent, const QString *title = NULL )
+	MessageDialog( QWidget *parent, const QString *title = nullptr )
 	: QDialog( parent )
 	{
 		if ( title ) {
@@ -90,6 +92,7 @@ class ScopeZoomer;
 class TrigLevel;
 class ParamUpdateVisitor;
 class MeasMarker;
+class MeasDiff;
 
 class ScaleXfrm;
 
@@ -114,6 +117,7 @@ private:
 	vector<QLabel*>                       vMeasLbls_;
 	vector<MeasMarker*>                   vMeasMark_;
 	vector<QwtPlotCurve*>                 vPltCurv_;
+	vector<MeasDiff*>                     vMeasDiff_;
 	shared_ptr<MessageDialog>             msgDialog_;
 	QwtPlot                              *plot_;
 	ScopeZoomer                          *lzoom_;
@@ -144,7 +148,7 @@ private:
 
 public:
 
-	Scope(FWPtr fw, bool sim=false, unsigned nsamples = 0, QObject *parent = NULL);
+	Scope(FWPtr fw, bool sim=false, unsigned nsamples = 0, QObject *parent = nullptr);
 	~Scope();
 
 	// assume channel is valid
@@ -153,6 +157,12 @@ public:
 
 	void
 	updateHScale();
+
+	unsigned
+	numChannels() const
+	{
+		return vChannelNames_.size();
+	}
 
 	void startReader(unsigned poolDepth = 4);
 
@@ -322,6 +332,8 @@ class ScaleXfrm;
 class MeasMarker;
 class NPreTriggerSamples;
 class Decimation;
+class Measurement;
+class MeasDiff;
 
 class ValChangedVisitor
 {
@@ -339,6 +351,8 @@ public:
 	virtual void visit(MeasMarker         *) {}
 	virtual void visit(NPreTriggerSamples *) {}
 	virtual void visit(Decimation         *) {}
+	virtual void visit(Measurement        *) {}
+	virtual void visit(MeasDiff           *) {}
 };
 
 template <typename T>
@@ -372,6 +386,8 @@ public:
 typedef Dispatcher<ValChangedVisitor> ValUpdater;
 
 class ScopeZoomer : public QwtPlotZoomer {
+private:
+	std::vector< std::pair< MovableMarker*, int > > markers_;
 public:
 	ScopeZoomer( int xAxisId, int yAxisId, QWidget *canvas )
 	: QwtPlotZoomer( xAxisId, yAxisId, canvas )
@@ -420,7 +436,7 @@ class ScaleXfrm : public QObject, public QwtScaleDraw, public ValUpdater {
 	vector<const char*> smlfmt_;
 
 public:
-	ScaleXfrm(bool vert, QString unit, ScaleXfrmCallback *cbck, QObject *parent = NULL)
+	ScaleXfrm(bool vert, QString unit, ScaleXfrmCallback *cbck, QObject *parent = nullptr)
 	: QObject ( parent           ),
 	  QwtScaleDraw(),
 	  rscl_   ( 1.0              ),
@@ -601,6 +617,13 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 		updatePlot();
 		printf( "setRect (%s): l->r %f -> %f\n", unit_.toStdString().c_str(), r.left(), r.right() );
 	}
+
+	static QString *
+	noUnit()
+	{
+		static QString s_;
+		return &s_;
+	}
 };
 
 class TxtAction;
@@ -613,7 +636,7 @@ public:
 class TxtAction : public QAction {
 	TxtActionNotify *v_;
 public:
-	TxtAction(const QString &txt, QObject *parent, TxtActionNotify *v = NULL)
+	TxtAction(const QString &txt, QObject *parent, TxtActionNotify *v = nullptr)
 	: QAction( txt, parent ),
 	  v_( v )
 	{
@@ -676,7 +699,7 @@ private:
 	vector<QString>
 	mkStrings(Scope *scp)
 	{
-		scp->acq()->getTriggerSrc( &src_, NULL );
+		scp->acq()->getTriggerSrc( &src_, nullptr );
 		vector<QString> rv;
 		switch ( src_ ) {
 			case CHA:
@@ -696,7 +719,7 @@ private:
 	}
 
 public:
-	TrigSrcMenu(Scope *scp, QWidget *parent = NULL)
+	TrigSrcMenu(Scope *scp, QWidget *parent = nullptr)
 	: MenuButton( mkStrings( scp ), parent ),
 	  scp_(scp)
 	{
@@ -723,7 +746,7 @@ public:
 	}
 
 	virtual void
-	accept(ValChangedVisitor *v)
+	accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );
 	}
@@ -735,7 +758,7 @@ protected:
 	vector<QString>    lbls_;
 	int                chnl_;
 public:
-	TglButton( Scope *scp, const vector<QString> &lbls, int chnl = 0, QWidget * parent = NULL )
+	TglButton( Scope *scp, const vector<QString> &lbls, int chnl = 0, QWidget * parent = nullptr )
 	: QPushButton( parent ),
 	  scp_  ( scp  ),
 	  lbls_ ( lbls ),
@@ -777,7 +800,7 @@ private:
 	std::string         ledName_;
 public:
 
-	FECTerminationTgl( Scope *scp, int channel, QWidget * parent = NULL )
+	FECTerminationTgl( Scope *scp, int channel, QWidget * parent = nullptr )
 	: TglButton( scp, vector<QString>( {"50Ohm", "1MOhm" } ), channel, parent ),
 	  ledName_( std::string("Term") + scp->getChannelName( channel )->toStdString() )
 	{
@@ -786,7 +809,7 @@ public:
 		scp_->leds()->setVal( ledName_, v );
 	}
 
-	virtual void accept(ValChangedVisitor *v)
+	virtual void accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );
 	}
@@ -806,13 +829,13 @@ public:
 class FECACCouplingTgl : public TglButton {
 public:
 
-	FECACCouplingTgl( Scope *scp, int channel, QWidget * parent = NULL )
+	FECACCouplingTgl( Scope *scp, int channel, QWidget * parent = nullptr )
 	: TglButton( scp, vector<QString>( {"AC", "DC" } ), channel, parent )
 	{
 		setLbl( getVal() );
 	}
 
-	virtual void accept(ValChangedVisitor *v)
+	virtual void accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );
 	}
@@ -826,13 +849,13 @@ public:
 class FECAttenuatorTgl : public TglButton {
 public:
 
-	FECAttenuatorTgl( Scope *scp, int channel, QWidget * parent = NULL )
+	FECAttenuatorTgl( Scope *scp, int channel, QWidget * parent = nullptr )
 	: TglButton( scp, vector<QString>( {"-20dB", "0dB" } ), channel, parent )
 	{
 		setLbl( getVal() );
 	}
 
-	virtual void accept(ValChangedVisitor *v)
+	virtual void accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );
 	}
@@ -851,7 +874,7 @@ private:
 	mkStrings(Scope *scp)
 	{
 		bool rising;
-		scp->acq()->getTriggerSrc( NULL, &rising );
+		scp->acq()->getTriggerSrc( nullptr, &rising );
 		vector<QString> rv;
 		if ( rising ) {
 			rv.push_back( "Rising"  );
@@ -864,14 +887,14 @@ private:
 	}
 	
 public:
-	TrigEdgMenu(Scope *scp, QWidget *parent = NULL)
+	TrigEdgMenu(Scope *scp, QWidget *parent = nullptr)
 	: MenuButton( mkStrings( scp ), parent ),
 	  scp_(scp)
 	{
 	}
 
 	virtual void
-	accept(ValChangedVisitor *v)
+	accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );
 	}
@@ -898,13 +921,13 @@ private:
 	}
 	
 public:
-	TrigAutMenu(Scope *scp, QWidget *parent = NULL)
+	TrigAutMenu(Scope *scp, QWidget *parent = nullptr)
 	: MenuButton( mkStrings( scp ), parent )
 	{
 	}
 
 	virtual void
-	accept(ValChangedVisitor *v)
+	accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );
 	}
@@ -928,7 +951,7 @@ private:
 	}
 	
 public:
-	TrigArmMenu(Scope *scp, QWidget *parent = NULL)
+	TrigArmMenu(Scope *scp, QWidget *parent = nullptr)
 	: MenuButton( mkStrings( scp ), parent ),
 	  scp_(scp)
 	{
@@ -943,7 +966,7 @@ public:
 	}
 
 	virtual void
-	accept(ValChangedVisitor *v)
+	accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );
 	}
@@ -1059,6 +1082,12 @@ public:
 		setLinePen  ( color_               );
 	}
 
+	Scope *
+	getScope() const
+	{
+		return scp_;
+	}
+
 	const QColor &
 	getColor() const
 	{
@@ -1132,7 +1161,7 @@ private:
 	Scope *scp_;
 	int    ch_;
 public:
-	MeasLbl( Scope *scp, int channel, const QString &lbl = QString(), QWidget *parent = NULL )
+	MeasLbl( Scope *scp, int channel, const QString &lbl = QString(), QWidget *parent = nullptr )
 	: QLabel( lbl, parent ),
 	  scp_  ( scp         ),
 	  ch_   ( channel     )
@@ -1170,7 +1199,7 @@ public:
       scp_         ( scp   )
 	{
 		setLineStyle( QwtPlotMarker::HLine );
-		scp_->acq()->getTriggerSrc( &src_, NULL );
+		scp_->acq()->getTriggerSrc( &src_, nullptr );
 		lvl_ = scp_->acq()->getTriggerLevelPercent();
 		// hold un-normalized volts
         vlt_ = raw2Volt( percent2Raw( lvl_ ), false );
@@ -1397,7 +1426,7 @@ QString TrigLevel::unitOff_( "<off>" );
 
 class TrigLevelLbl : public QLabel, public ValChangedVisitor {
 public:
-	TrigLevelLbl( TrigLevel *lvl, const QString &lbl = QString(), QWidget *parent = NULL )
+	TrigLevelLbl( TrigLevel *lvl, const QString &lbl = QString(), QWidget *parent = nullptr )
 	: QLabel( lbl, parent )
 	{
 		visit( lvl );
@@ -1601,7 +1630,7 @@ linv:  (t - off)*rscl/scl + roff
 
 class TrigDelayLbl : public QLabel, public ValChangedVisitor {
 public:
-	TrigDelayLbl( NPreTriggerSamples *npts, const QString &lbl = QString(), QWidget *parent = NULL )
+	TrigDelayLbl( NPreTriggerSamples *npts, const QString &lbl = QString(), QWidget *parent = nullptr )
 	: QLabel( lbl, parent )
 	{
 		visit( npts );
@@ -1618,7 +1647,7 @@ protected:
 	QLabel  *lbl_;
 	QString  unit_;
 public:
-	LabeledSlider( QLabel *lbl, const QString &unit, Qt::Orientation orient, QWidget *parent = NULL )
+	LabeledSlider( QLabel *lbl, const QString &unit, Qt::Orientation orient, QWidget *parent = nullptr )
 	: QSlider( orient, parent ),
 	  lbl_ ( lbl  ),
 	  unit_( unit )
@@ -1638,7 +1667,7 @@ class AttenuatorSlider : public LabeledSlider {
 private:
 	int channel_;
 public:
-	AttenuatorSlider( Scope *scp, int channel, QLabel *lbl, Qt::Orientation orient, QWidget *parent = NULL )
+	AttenuatorSlider( Scope *scp, int channel, QLabel *lbl, Qt::Orientation orient, QWidget *parent = nullptr )
 	: LabeledSlider( lbl, "dB", orient, parent ),
 	  channel_( channel )
 	{
@@ -1825,16 +1854,16 @@ public:
 Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 : QObject        ( parent   ),
   Board          ( fw, sim  ),
-  axisHScl_      ( NULL     ),
-  reader_        ( NULL     ),
-  xRange_        ( NULL     ),
+  axisHScl_      ( nullptr  ),
+  reader_        ( nullptr  ),
+  xRange_        ( nullptr  ),
   nsmpl_         ( nsamples ),
   pipe_          ( ScopeReaderCmdPipe::create() ),
-  trgArm_        ( NULL     ),
+  trgArm_        ( nullptr  ),
   single_        ( false    ),
   lsync_         ( 0        ),
-  picker_        ( NULL     ),
-  paramUpd_      ( NULL     )
+  picker_        ( nullptr  ),
+  paramUpd_      ( nullptr  )
 {
 	if ( 0 == nsmpl_ || nsmpl_ > acq_.getMaxNSamples() ) {
 		nsmpl_ = acq_.getMaxNSamples();
@@ -1860,7 +1889,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	for ( auto it = vChannelNames_.begin();  it != vChannelNames_.end(); ++it ) {
 		vOvrLEDNames_.push_back( string("OVR") + it->toStdString() );
 		vYScale_.push_back     ( acq_.getBufSampleSize() > 1 ? 32767.0 : 127.0 );
-		vAxisVScl_.push_back   ( NULL );
+		vAxisVScl_.push_back   ( nullptr );
 	}
 
 	for ( auto it = vChannelColors_.begin(); it != vChannelColors_.end(); ++it ) {
@@ -2135,6 +2164,9 @@ Scope::~Scope()
 	}
 	if ( paramUpd_ ) {
 		delete paramUpd_;
+	}
+	for ( auto it = vMeasDiff_.begin(); it != vMeasDiff_.end(); ++it ) {
+		delete *it;
 	}
 }
 
