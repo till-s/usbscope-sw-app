@@ -388,9 +388,11 @@ public:
 		static QString sep("/");
 		QPointF pointf( invTransform( point ) );
 		return QwtText(
-			plot()->axisScaleDraw( xAxis() )->label( pointf.x() ).text()
+			plot()->axisScaleDraw( plot()->xBottom )->label( pointf.x() ).text()
 			+ sep + 
-			plot()->axisScaleDraw( yAxis() )->label( pointf.y() ).text()
+			plot()->axisScaleDraw( plot()->yLeft )->label( pointf.y() ).text()
+			+ sep + 
+			plot()->axisScaleDraw( plot()->yRight)->label( pointf.y() ).text()
 		);
 	}
 };
@@ -1883,8 +1885,14 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	lzoom_        = new ScopeZoomer( plot_->xBottom, plot_->yLeft, plot_->canvas() );
 
-	rzoom_        = new ScopeZoomer( plot_->xBottom, plot_->yRight, plot_->canvas() );
 	// RHS zoomer 'silently' tracks the LHS one...
+	// However, the zoomers must not share any axis. Otherwise
+	// the shared axis will rescaled twice by the zoomer and the
+	// zoomed area will be wrong (found out the hard way; debugging
+	// and inspecting qwt source code).
+	// It seems we may simply attach the rhs zoomer to the otherwise unused
+	// xTop axis and this just works...
+	rzoom_        = new ScopeZoomer( plot_->xTop, plot_->yRight, plot_->canvas() );
 	rzoom_->setTrackerMode( QwtPicker::AlwaysOff );
 	rzoom_->setRubberBand( QwtPicker::NoRubberBand );
 	
