@@ -143,8 +143,8 @@ private:
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
 
-	unique_ptr<QHBoxLayout>
-	mkMeasRow(vector<QLabel *> *pv, MeasMarker *mrk = NULL);
+	void
+	addMeasRow(QGridLayout *, QLabel *tit, vector<QLabel *> *pv, MeasMarker *mrk = nullptr, MeasDiff *md = nullptr);
 
 public:
 
@@ -597,6 +597,7 @@ public:
 	std::pair<double, QString *>
 	normalize(double val)
 	{
+		val = abs(val);
 		return normalize(val, val);
 	}
 
@@ -1254,9 +1255,11 @@ public:
 
 	virtual void visit(MeasMarker *mrk) override
 	{
-		xVal_ = scp_->axisHScl()->linr( mrk->xValue(), false );
+		double xraw = mrk->xValue();
+		xVal_ = scp_->axisHScl()->linr( xraw, false );
 		for ( auto ch = 0; ch < scp_->numChannels(); ++ch ) {
-			yVals_[ch] = scp_->getSample( ch, round(xVal_), false );
+			yVals_[ch] = scp_->getSample( ch, round( xraw ), false );
+printf("Mease val ch %d: %g/%g\n",ch, xVal_, yVals_[ch]);
 		}
 		valChanged();
 	}
@@ -2256,17 +2259,22 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	vMarkers.push_back( meas2 );
 	lzoom_->attachMarker( meas2, Qt::Key_2 );
 
-//	auto measDiff = std::unique_ptr<MeasDiff>( new MeasDiff( meas1, meas2 ) );
-//	vMeasDiff_.push_back( measDiff.get() );
+	auto measDiff = std::unique_ptr<MeasDiff>( new MeasDiff( meas1, meas2 ) );
+	vMeasDiff_.push_back( measDiff.get() );
 
 	formLay->addRow( new QLabel( "Measurements:" ) );
+	auto grid = std::unique_ptr<QGridLayout>( new QGridLayout() );
 	for (auto i = 0; i < vMeasMark_.size(); ++i ) {
 		auto tit = unique_ptr<QLabel>( new QLabel( QString( "Mark%1" ).arg(i) ) );
 		tit->setStyleSheet( vMeasMark_[i]->getStyleSheet() );
-		formLay->addRow( tit.release(), mkMeasRow( &vMeasLbls_, vMeasMark_[i] ).release() );
+		addMeasRow( grid.get(), tit.get(), &vMeasLbls_, vMeasMark_[i] );
+		tit.release();
 	}
-	formLay->addRow( new QLabel( "Avg"   ), mkMeasRow( &vMeanLbls_ ).release() );
-	formLay->addRow( new QLabel( "RMS"   ), mkMeasRow( &vStdLbls_  ).release() );
+	addMeasRow( grid.get(), new QLabel( "M1-M0" ), &vMeasLbls_, nullptr, measDiff.get() );
+	addMeasRow( grid.get(), new QLabel( "Avg"   ), &vMeanLbls_ );
+	addMeasRow( grid.get(), new QLabel( "RMS"   ), &vStdLbls_  );
+
+	formLay->addRow( grid.release() );
 
 #if 0
 	for ( int ch = 0; ch < numChannels(); ch++ ) {
@@ -2331,6 +2339,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
     paramUpd.release();
 	xRange.release();
+	measDiff.release();
 }
 
 Scope::~Scope()
@@ -2572,21 +2581,31 @@ Scope::smplToString(int channel, int idx)
 	return QString::asprintf("%7.2f", v) + *xfrm->getUnit();
 }
 
-unique_ptr<QHBoxLayout>
-Scope::mkMeasRow(vector<QLabel *> *pv, MeasMarker *mrk)
+void
+Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, MeasMarker *mrk, MeasDiff *md)
 {
-	auto hlay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
-	for ( int ch = 0; ch < vChannelNames_.size(); ch++ ) {
-		auto lbl   = unique_ptr<MeasLbl>( new MeasLbl( this, ch ) );
-		lbl->setStyleSheet( vChannelStyles_[ch] );
-		lbl->setAlignment( Qt::AlignRight );
-		if ( mrk ) {
-			mrk->subscribe( lbl.get() );
+	int row = grid->rowCount();
+	int col = 0;
+	grid->addWidget( tit, row, col, Qt::AlignLeft );
+	++col;
+	for ( int ch = -1; ch < (int) numChannels(); ch++ ) {
+		if ( -1 != ch || md ) {
+			// ch == -1 creates a deltaX label when dealing with a MeasDiff
+			auto lbl   = unique_ptr<MeasLbl>( new MeasLbl( this, ch ) );
+			if ( ch >= 0 ) {
+				lbl->setStyleSheet( vChannelStyles_[ch] );
+			}
+			lbl->setAlignment( Qt::AlignRight );
+			if ( md ) {
+				md->subscribe( lbl.get() );
+			} else if ( mrk ) {
+				mrk->subscribe( lbl.get() );
+			}
+			pv->push_back( lbl.get() );
+			grid->addWidget( lbl.release(), row, col, Qt::AlignRight );
 		}
-		pv->push_back( lbl.get() );
-		hlay->addWidget( lbl.release() );
+		++col;
 	}
-	return hlay;
 }
 
 
