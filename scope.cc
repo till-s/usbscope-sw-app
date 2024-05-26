@@ -885,7 +885,7 @@ class FECACCouplingTgl : public TglButton {
 public:
 
 	FECACCouplingTgl( Scope *scp, int channel, QWidget * parent = nullptr )
-	: TglButton( scp, vector<QString>( {"AC", "DC" } ), channel, parent )
+	: TglButton( scp, vector<QString>( {"DC", "AC" } ), channel, parent )
 	{
 		setLbl( getVal() );
 	}
