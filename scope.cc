@@ -1259,7 +1259,6 @@ public:
 		xVal_ = scp_->axisHScl()->linr( xraw, false );
 		for ( auto ch = 0; ch < scp_->numChannels(); ++ch ) {
 			yVals_[ch] = scp_->getSample( ch, round( xraw ), false );
-printf("Mease val ch %d: %g/%g\n",ch, xVal_, yVals_[ch]);
 		}
 		valChanged();
 	}
