@@ -990,9 +990,11 @@ public:
 };
 
 class TrigArmMenu : public MenuButton {
+public:
+    enum State { OFF, SINGLE, CONTINUOUS };
 private:
 	Scope *scp_;
-    bool   single_;
+    State  state_;
 
 	static vector<QString>
 	mkStrings(Scope *scp)
@@ -1014,10 +1016,10 @@ public:
 		scp_->postTrgMode( text() );
 	}
 
-	virtual bool
-	single()
+	virtual State
+	getState()
 	{
-		return single_;
+		return state_;
 	}
 
 	virtual void
@@ -1029,8 +1031,27 @@ public:
 	virtual void
 	notify(TxtAction *act) override
 	{
-		single_ = (act->text() == "Single");
+		if ( act->text() == "Continuous" ) {
+			state_ = CONTINUOUS;
+		} else if ( act->text() == "Single" ) {
+			state_ = SINGLE;
+		} else {
+			state_ = OFF;
+		}
 		MenuButton::notify( act );
+	}
+
+	virtual void
+	update(State newState) {
+		if ( newState != state_ ) {
+			state_ = newState;
+			switch ( state_ ) {
+				case CONTINUOUS: setText("Continuous"); break;
+				case SINGLE    : setText("Single");     break;
+				case OFF       : setText("Off");        break;
+			}
+			valChanged();
+		}
 	}
 };
 
@@ -2428,9 +2449,13 @@ Scope::newData(BufPtr buf)
 		return;
 	}
 
-	if ( trgArm_->single() && ( buf->getSync() != lsync_ ) ) {
+	if ( TrigArmMenu::OFF == trgArm_->getState() ) {
+		return;
+	}
+
+	if ( TrigArmMenu::SINGLE == trgArm_->getState() && ( buf->getSync() != lsync_ ) ) {
 		// single-trigger event received
-		trgArm_->setText( "Off" );
+		trgArm_->update( TrigArmMenu::OFF );
 	}
 
 	unsigned hdr = buf->getHdr();
