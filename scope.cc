@@ -88,6 +88,7 @@ public:
 
 class ScaleXfrm;
 class TrigArmMenu;
+class TrigSrcMenu;
 class ScopeZoomer;
 class TrigLevel;
 class ParamUpdateVisitor;
@@ -134,6 +135,7 @@ private:
 	ScopeReaderCmd                        cmd_;
 	vector<double>                        vYScale_;
 	TrigArmMenu                          *trgArm_;
+	TrigSrcMenu                          *trgSrc_;
 	bool                                  single_;
 	unsigned                              lsync_;
 	QwtPlotPicker                        *picker_;
@@ -207,6 +209,12 @@ public:
 	acq()
 	{
 		return &acq_;
+	}
+
+	TrigSrcMenu *
+	trgSrc()
+	{
+		return trgSrc_;
 	}
 
 	PGAPtr
@@ -331,6 +339,7 @@ class AttenuatorSlider;
 class FECTerminationTgl;
 class FECAttenuatorTgl;
 class FECACCouplingTgl;
+class ExtTrigOutEnTgl;
 class ScaleXfrm;
 class MeasMarker;
 class NPreTriggerSamples;
@@ -350,6 +359,7 @@ public:
 	virtual void visit(FECTerminationTgl  *) {}
 	virtual void visit(FECAttenuatorTgl   *) {}
 	virtual void visit(FECACCouplingTgl   *) {}
+	virtual void visit(ExtTrigOutEnTgl    *) {}
 	virtual void visit(ScaleXfrm          *) {}
 	virtual void visit(MeasMarker         *) {}
 	virtual void visit(NPreTriggerSamples *) {}
@@ -918,6 +928,40 @@ public:
 	virtual bool getVal() override
 	{
 		return scp_->fec()->getAttenuator( channel() );
+	}
+};
+
+class ExtTrigOutEnTgl : public TglButton, public ValChangedVisitor {
+public:
+	ExtTrigOutEnTgl( Scope *scp, QWidget * parent = nullptr )
+	: TglButton( scp, vector<QString>( {"Output", "Input" } ), 0, parent )
+	{
+		setLbl( getVal() );
+	}
+
+	virtual void visit(TrigSrcMenu *trgSrc)
+	{
+		if ( trgSrc->getSrc() == EXT ) {
+			// firmware switches output off automatically; update
+			// label accordingly
+			setLblOff();
+		}
+	}
+
+	virtual void setLblOff()
+	{
+			setLbl( 0 );
+	}
+
+	virtual void accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+
+	virtual bool getVal() override
+	{
+		bool rv = scp_->acq()->getExtTrigOutEnable();
+		return rv;
 	}
 };
 
@@ -2025,6 +2069,18 @@ public:
 		scp_->fec()->setACMode( tgl->channel(), tgl->isChecked() );
 	}
 
+	virtual void visit(ExtTrigOutEnTgl *tgl) override
+	{
+		if ( EXT == scp_->trgSrc()->getSrc() ) {
+			if ( tgl->isChecked() ) {
+				tgl->setLblOff();
+				scp_->message("In EXT Trigger Mode GPIO cannot be set to OUTPUT");
+			}
+		} else {
+			scp_->acq()->setExtTrigOutEnable( tgl->isChecked() );
+		}
+	}
+
 	virtual void visit(TrigLevel *lvl) override
 	{
 		scp_->acq()->setTriggerLevelPercent( lvl->levelPercent() );
@@ -2192,10 +2248,10 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
     MenuButton *mnu;
 
-	mnu           = new TrigSrcMenu( this );
-	mnu->subscribe( paramUpd_ );
-    mnu->subscribe( trigLvl_  );
-	formLay->addRow( new QLabel( "Trigger Source"    ), mnu );
+	trgSrc_       = new TrigSrcMenu( this );
+	trgSrc_->subscribe( paramUpd_ );
+    trgSrc_->subscribe( trigLvl_  );
+	formLay->addRow( new QLabel( "Trigger Source"    ), trgSrc_ );
 
 	mnu           = new TrigEdgMenu( this );
 	mnu->subscribe( paramUpd_ );
@@ -2208,6 +2264,15 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
     trgArm_ = new TrigArmMenu( this );
 	formLay->addRow( new QLabel( "Trigger Arm"       ), trgArm_ );
 	trgArm_->subscribe( paramUpd_ );
+
+	{
+    auto extOutEnU = unique_ptr<ExtTrigOutEnTgl>( new ExtTrigOutEnTgl( this ) );
+	auto extOutEn  = extOutEnU.get();
+	formLay->addRow( new QLabel( "Ext. Trig. GPIO") , extOutEn );
+	extOutEnU.release();
+	extOutEn->subscribe( paramUpd_ );
+	trgSrc_->subscribe( extOutEn );
+	}
 
 	editWid       = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	auto npts     = new NPreTriggerSamples( editWid.get(), this );
