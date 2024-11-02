@@ -3,6 +3,7 @@
 #include <sys/fcntl.h>
 #include <errno.h>
 #include <system_error>
+#include <stdint.h>
 
 SysPipe::SysPipe()
 {
