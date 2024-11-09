@@ -83,7 +83,7 @@ public:
 	{
 		lbl_->setText( msg );
 	}
-	
+
 };
 
 class ScaleXfrm;
@@ -228,7 +228,7 @@ public:
 	{
 		return fec_;
 	}
-	
+
 	LEDPtr
 	leds()
 	{
@@ -420,9 +420,9 @@ public:
 		QPointF pointf( invTransform( point ) );
 		return QwtText(
 			plot()->axisScaleDraw( plot()->xBottom )->label( pointf.x() ).text()
-			+ sep + 
+			+ sep +
 			plot()->axisScaleDraw( plot()->yLeft )->label( pointf.y() ).text()
-			+ sep + 
+			+ sep +
 			plot()->axisScaleDraw( plot()->yRight)->label( pointf.y() ).text()
 		);
 	}
@@ -541,7 +541,7 @@ public:
 		return rscl_;
 	}
 
-	
+
 	virtual void
 	setOffset(double off)
 	{
@@ -654,7 +654,7 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 			nval *= uscl_;
 		}
 		return nval;
-	}	
+	}
 
 	virtual double
 	linv(double val, bool decNorm = true) const
@@ -667,7 +667,7 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 		nval = (val - off_)/scl_ * rscl_ + roff_;
 		return nval;
 	}
-			
+
 	virtual QwtText
 	label(double val) const override
 	{
@@ -780,7 +780,7 @@ private:
 		rv.push_back( "Channel A" );
 		rv.push_back( "Channel B" );
 		rv.push_back( "External"  );
-		return rv;	
+		return rv;
 	}
 
 public:
@@ -982,9 +982,9 @@ private:
 		}
 		rv.push_back( "Rising"  );
 		rv.push_back( "Falling" );
-		return rv;	
+		return rv;
 	}
-	
+
 public:
 	TrigEdgMenu(Scope *scp, QWidget *parent = nullptr)
 	: MenuButton( mkStrings( scp ), parent ),
@@ -1016,9 +1016,9 @@ private:
 		}
 		rv.push_back( "On"  );
 		rv.push_back( "Off" );
-		return rv;	
+		return rv;
 	}
-	
+
 public:
 	TrigAutMenu(Scope *scp, QWidget *parent = nullptr)
 	: MenuButton( mkStrings( scp ), parent )
@@ -1048,9 +1048,9 @@ private:
 		rv.push_back( "Off" );
 		rv.push_back( "Single"  );
 		rv.push_back( "Continuous"  );
-		return rv;	
+		return rv;
 	}
-	
+
 public:
 	TrigArmMenu(Scope *scp, QWidget *parent = nullptr)
 	: MenuButton( mkStrings( scp ), parent ),
@@ -1428,7 +1428,7 @@ private:
 	TriggerSource  src_;
 
 	static QString unitOff_;
-	
+
 public:
 	TrigLevel( QLineEdit *edt, Scope *scp )
 	: ParamValidator( edt, new QDoubleValidator(-100.0,100.0,-1) ),
@@ -1780,7 +1780,7 @@ public:
 	  MovableMarker    (                                     )
 	{
 		setLineStyle( QwtPlotMarker::VLine );
-		npts_ = scp_->acq()->getNPreTriggerSamples(); 
+		npts_ = scp_->acq()->getNPreTriggerSamples();
 		visit( scp_->axisHScl() );
 	}
 
@@ -1866,16 +1866,29 @@ linv:  (t - off)*rscl/scl + roff
 };
 
 class TrigDelayLbl : public QLabel, public ValChangedVisitor {
+protected:
+	Scope             *scp_;
 public:
-	TrigDelayLbl( NPreTriggerSamples *npts, const QString &lbl = QString(), QWidget *parent = nullptr )
-	: QLabel( lbl, parent )
+	TrigDelayLbl( Scope *scp, const QString &lbl = QString(), QWidget *parent = nullptr )
+	: QLabel( lbl, parent ),
+	  scp_( scp )
 	{
-		visit( npts );
+		updateLabel();
+	}
+
+	virtual void updateLabel()
+	{
+		setText( QString("Trigger Delay [%1]").arg( *scp_->axisHScl()->getUnit() ) );
 	}
 
 	virtual void visit(NPreTriggerSamples *npts) override
 	{
-		setText( QString("Trigger Delay [%1]").arg( *npts->getUnit() ) );
+		updateLabel();
+	}
+
+	virtual void visit(Decimation *decm)
+	{
+		updateLabel();
 	}
 };
 
@@ -1895,7 +1908,7 @@ public:
 	void
 	update(int val)
 	{
-		lbl_->setText( QString::asprintf("%d", val) + unit_ );	
+		lbl_->setText( QString::asprintf("%d", val) + unit_ );
 		valChanged();
 	}
 };
@@ -2004,6 +2017,7 @@ ScaleXfrm::smlfmt_ = vector<const char *>({
 		"p%s"
 	});
 
+// Visitor to forward GUI settings to the device
 class ParamUpdateVisitor : public ValChangedVisitor {
 	Scope *scp_;
 public:
@@ -2178,7 +2192,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	panner_       = new QwtPlotPanner( plot_->canvas() );
 	panner_->setMouseButton( Qt::LeftButton, Qt::ControlModifier );
-	
+
 	auto sclDrw   = unique_ptr<ScaleXfrm>( new ScaleXfrm( true, "V", this ) );
 	sclDrw->setRawScale( vYScale_[CHA_IDX] );
 	vAxisVScl_[CHA_IDX] = sclDrw.get();
@@ -2278,9 +2292,10 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto npts     = new NPreTriggerSamples( editWid.get(), this );
 	cmd_.npts_    = npts->getVal();
 	npts->subscribe( paramUpd_ );
-	auto trigDlyLbl = unique_ptr<TrigDelayLbl>( new TrigDelayLbl( npts ) );
-	npts->subscribe( trigDlyLbl.get() );
-	formLay->addRow( trigDlyLbl.release(), editWid.release() );
+	auto trigDlyLblUP = unique_ptr<TrigDelayLbl>( new TrigDelayLbl( this ) );
+	auto trigDlyLbl   = trigDlyLblUP.get();
+	npts->subscribe( trigDlyLbl );
+	formLay->addRow( trigDlyLblUP.release(), editWid.release() );
 	axisHScl_->subscribe( npts );
 
 	unsigned cic0, cic1;
@@ -2290,6 +2305,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	editWid       = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	auto decm     = new Decimation( editWid.get(), this );
 	decm->subscribe( paramUpd_ );
+	decm->subscribe( trigDlyLbl );
+
 	formLay->addRow( new QLabel( "Decimation"        ), editWid.release() );
 
 	formLay->addRow( new QLabel( "ADC Clock Freq."   ), new QLabel( QString::asprintf( "%10.3e", getADCClkFreq() ) ) );
@@ -2483,7 +2500,7 @@ Scope::mkGainControls( int channel, QColor &color )
 	hLay->addWidget( lbl.release() );
 
 	rv.first  = std::move( hLay );
-	
+
 	return rv;
 }
 
@@ -2706,6 +2723,8 @@ bool        sim      = false;
 unsigned    nsamples = 0;
 int         opt;
 unsigned   *u_p;
+double     *d_p;
+double      scale    = -1.0;
 
 	if ( ! fnam && ! (fnam = getenv("BBCLI_DEVICE")) ) {
 		fnam = "/dev/ttyACM0";
@@ -2713,17 +2732,23 @@ unsigned   *u_p;
 
 	QApplication app(argc, argv);
 
-	while ( (opt = getopt( argc, argv, "d:sn:" )) > 0 ) {
+	while ( (opt = getopt( argc, argv, "d:sn:S:" )) > 0 ) {
 		u_p = 0;
+		d_p = 0;
 		switch ( opt ) {
 			case 'd': fnam = optarg;     break;
 			case 's': sim  = true;       break;
 			case 'n': u_p  = &nsamples;  break;
+			case 'S': d_p  = &scale;     break;
 			default:
 				fprintf(stderr, "Error: Unknown option -%c\n", opt);
 				return 1;
 		}
 		if ( u_p && 1 != sscanf( optarg, "%i", u_p ) ) {
+			fprintf(stderr, "Error: unable to scan argument of option -%c\n", opt);
+			return 1;
+		}
+		if ( d_p && 1 != sscanf( optarg, "%lg", d_p ) ) {
 			fprintf(stderr, "Error: unable to scan argument of option -%c\n", opt);
 			return 1;
 		}
@@ -2766,6 +2791,12 @@ unsigned   *u_p;
 #endif
 #if 1
 	Scope sc( FWComm::create( fnam ), sim, nsamples );
+	if ( scale > 0.0 ) {
+		int i;
+		for ( i = 0; i < sc.numChannels(); ++i ) {
+			sc.setVoltScale( i, scale );
+		}
+	}
 
 	sc.startReader();
 
