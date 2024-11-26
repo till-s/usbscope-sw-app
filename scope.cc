@@ -2133,6 +2133,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	}
 
 	acq_.setNSamples( nsmpl_ );
+	acq_.flushBuf();
 
 	auto xRange = unique_ptr<double[]>( new double[ nsmpl_ ] );
 	xRange_ = xRange.get();
