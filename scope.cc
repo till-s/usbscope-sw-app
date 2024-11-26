@@ -104,8 +104,9 @@ public:
 
 class Scope : public QObject, public Board, public ScaleXfrmCallback {
 private:
-	const static int                      CHA_IDX = 0;
-	const static int                      CHB_IDX = 1;
+	constexpr static int                  CHA_IDX    = 0;
+	constexpr static int                  CHB_IDX    = 1;
+	constexpr static int                  NSMPL_DFLT = 2048;
 	unique_ptr<QMainWindow>               mainWin_;
 	unsigned                              decimation_;
 	vector<QWidget*>                      vOverRange_;
@@ -2128,7 +2129,10 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
   picker_        ( nullptr  ),
   paramUpd_      ( nullptr  )
 {
-	if ( 0 == nsmpl_ || nsmpl_ > acq_.getMaxNSamples() ) {
+	if ( 0 == nsmpl_ ) {
+		nsmpl_ = NSMPL_DFLT;
+	}
+	if ( nsmpl_ > acq_.getMaxNSamples() ) {
 		nsmpl_ = acq_.getMaxNSamples();
 	}
 
