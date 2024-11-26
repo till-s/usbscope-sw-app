@@ -2754,9 +2754,17 @@ double      scale    = -1.0;
 		}
 	}
 
-	QSM *qsm = new QSM();
+	try {
+		QFile file("stylesheet.qss");
+		file.open(QFile::ReadOnly);
+		app.setStyleSheet( QLatin1String( file.readAll() ) );
+	} catch (std::exception &e) {
+		fprintf(stderr, "Unable to load style sheet: %s\n", e.what());
+	}
+
 
 #if 0
+	QSM *qsm = new QSM();
 	QFuture<void> fut;
 	QFuture<void> fut1;
 	QFutureWatcher<void> w;
