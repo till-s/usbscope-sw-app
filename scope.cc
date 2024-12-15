@@ -2441,7 +2441,9 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 				formLay->addRow( new QLabel( "Calibration DAC:" ) );
 				dacHasTitle = true;
 			}
-			formLay->addRow( new QLabel( *getChannelName( ch ) ), dac.release()->getEditWidget() );
+			auto lbl = unique_ptr<QLabel>( new QLabel( *getChannelName( ch ) ) );
+			lbl->setStyleSheet( styleString );
+			formLay->addRow( lbl.release(), dac.release()->getEditWidget() );
 		}
 	}
 
