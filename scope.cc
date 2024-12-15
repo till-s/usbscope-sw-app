@@ -482,6 +482,7 @@ class ScaleXfrm : public QObject, public QwtScaleDraw, public ValUpdater {
 	QString             unit_;
 	double              uscl_;
 	QString            *uptr_;
+	QColor             *color_;
 
 	vector<QString>     usml_;
 	vector<QString>     ubig_;
@@ -502,7 +503,8 @@ public:
 	  cbck_   ( cbck             ),
 	  vert_   ( vert             ),
 	  unit_   ( unit             ),
-	  uscl_   ( 1.0              )
+	  uscl_   ( 1.0              ),
+	  color_  ( nullptr          )
 	{
 		for ( auto it = smlfmt_.begin(); it != smlfmt_.end(); ++it ) {
 			usml_.push_back( QString::asprintf( *it, unit.toStdString().c_str() ) );
@@ -648,7 +650,7 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 		// https://www.qtcentre.org/threads/64212-Can-an-Axis-Labels-be-Redrawn
 		invalidateCache();
 
-		printf( "calling updateScale (%s): l->r %f -> %f; scl %lf\n", unit_.toStdString().c_str(), rect_.left(), rect_.right(), scl_ );
+//		printf( "calling updateScale (%s): l->r %f -> %f; scl %lf\n", unit_.toStdString().c_str(), rect_.left(), rect_.right(), scl_ );
 		cbck_->updateScale( this );
 		valChanged();
 	}
@@ -681,7 +683,11 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 	label(double val) const override
 	{
 		double nval = linr( val );
-		return QwtScaleDraw::label( nval );
+		QwtText lbl = QwtScaleDraw::label( nval );
+		if ( color_ ) {
+			lbl.setColor( *color_ );
+		}
+		return lbl;
 	}
 
 	void
@@ -689,7 +695,13 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 	{
 		rect_ = r;
 		updatePlot();
-		printf( "setRect (%s): l->r %f -> %f\n", unit_.toStdString().c_str(), r.left(), r.right() );
+//		printf( "setRect (%s): l->r %f -> %f\n", unit_.toStdString().c_str(), r.left(), r.right() );
+	}
+
+	void
+	setColor(QColor *color)
+	{
+		color_ = color;
 	}
 
 	static QString *
@@ -1165,6 +1177,12 @@ public:
 	validate( QString &s, int &pos ) const override
 	{
 		return static_cast<QValidator *>( parent() )->validate( s, pos );
+	}
+
+	QLineEdit *
+	getEditWidget() const
+	{
+		return edt_;
 	}
 };
 
@@ -1751,8 +1769,8 @@ public:
 
 	virtual void set(const QString &s) override
 	{
-		unsigned n = s.toDouble();
-		val_ = n;
+		printf("Set %s\n", s.toStdString().c_str());
+		val_ = s.toDouble();
 		setVal();
 		valChanged();
 	}
@@ -2250,6 +2268,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	updateVScale( CHA_IDX );
 	plot_->setAxisScaleDraw( QwtPlot::yLeft, sclDrw.get() );
 	sclDrw->setParent( plot_ );
+	sclDrw->setColor( &vChannelColors_[CHA_IDX] );
 	sclDrw.release();
 	plot_->setAxisScale( QwtPlot::yLeft, -vAxisVScl_[CHA_IDX]->rawScale() - 1, vAxisVScl_[CHA_IDX]->rawScale() );
 
@@ -2259,6 +2278,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	updateVScale( CHB_IDX );
 	plot_->setAxisScaleDraw( QwtPlot::yRight, sclDrw.get() );
 	sclDrw->setParent( plot_ );
+	sclDrw->setColor( &vChannelColors_[CHB_IDX] );
 	sclDrw.release();
 	plot_->setAxisScale( QwtPlot::yRight, -vAxisVScl_[CHB_IDX]->rawScale() - 1, vAxisVScl_[CHB_IDX]->rawScale() );
 	plot_->enableAxis( QwtPlot::yRight );
@@ -2370,32 +2390,36 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 		formLay->addRow( p.first.release() );
 	}
 
-	bool hasTitle = false;
+	bool inpHasTitle = false;
 
 	for ( int ch = 0; ch < numChannels(); ch++ ) {
-		vector< unique_ptr< QWidget > > v;
+		vector< unique_ptr< QWidget > > vInp;
+		QString styleString( QString("color: ") + vChannelColors_[ch].name() );
 		try {
 			auto w = new FECTerminationTgl( this, ch );
-			v.push_back( unique_ptr< FECTerminationTgl >( w ) );
+			w->setStyleSheet( styleString );
+			vInp.push_back( unique_ptr< FECTerminationTgl >( w ) );
 			w->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) { printf("FEC Caught\n"); }
 		try {
 			auto w = new FECACCouplingTgl( this, ch );
-			v.push_back( unique_ptr< QWidget >( w ) );
+			vInp.push_back( unique_ptr< QWidget >( w ) );
+			w->setStyleSheet( styleString );
 			w->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) {}
 		try {
 			auto w = new FECAttenuatorTgl( this, ch );
-			v.push_back( unique_ptr< QWidget >( w ) );
+			vInp.push_back( unique_ptr< QWidget >( w ) );
+			w->setStyleSheet( styleString );
 			w->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) {}
-		if ( v.size() > 0 ) {
-			if ( ! hasTitle ) {
+		if ( vInp.size() > 0 ) {
+			if ( ! inpHasTitle ) {
 				formLay->addRow( new QLabel( "Input Stage:" ) );
-				hasTitle = true;
+				inpHasTitle = true;
 			}
 			auto hbx = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
-			for ( auto it  = v.begin(); it != v.end(); ++it ) {
+			for ( auto it  = vInp.begin(); it != vInp.end(); ++it ) {
 				hbx->addWidget( it->release() );
 			}
 			formLay->addRow( hbx.release() );
@@ -2713,12 +2737,18 @@ void
 Scope::updateScale( ScaleXfrm *xfrm )
 {
 	if ( xfrm == vAxisVScl_[CHA_IDX] ) {
-		plot_->setAxisTitle( QwtPlot::yLeft,   *xfrm->getUnit() );
+		QwtText txt( plot_->axisTitle( QwtPlot::yLeft ) );
+		txt.setText( *xfrm->getUnit() );
+		txt.setColor( vChannelColors_[CHA_IDX] );
+		plot_->setAxisTitle( QwtPlot::yLeft, txt );
 		// the only way to let updateAxes recompute the scale ticks is replacing the scale
 		// engine. Note that setAxisScaleEngine() takes ownership (and deletes the old engine)
 		plot_->setAxisScaleEngine( QwtPlot::yLeft, new ScopeSclEng( vAxisVScl_[CHA_IDX] ) );
 	} else if ( xfrm == vAxisVScl_[CHB_IDX] ) {
-		plot_->setAxisTitle( QwtPlot::yRight,  *xfrm->getUnit() );
+		QwtText txt( plot_->axisTitle( QwtPlot::yRight ) );
+		txt.setText( *xfrm->getUnit() );
+		txt.setColor( vChannelColors_[CHB_IDX] );
+		plot_->setAxisTitle( QwtPlot::yRight,  txt );
 		plot_->setAxisScaleEngine( QwtPlot::yRight, new ScopeSclEng( vAxisVScl_[CHB_IDX] ) );
 	} else if ( xfrm == axisHScl_ ) {
 		plot_->setAxisTitle( QwtPlot::xBottom, *xfrm->getUnit() );
