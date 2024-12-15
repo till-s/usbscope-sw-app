@@ -19,5 +19,6 @@ add_executable(scope ${SRCS})
 include_directories(./ ../lib ../../artix7_v1/fw/modules/usbadc-support/sw/ /usr/include/qwt)
 set_target_properties(scope PROPERTIES AUTOMOC ON)
 
-target_link_directories(scope PRIVATE ../lib/bld ../../artix7_v1/fw/modules/usbadc-support/sw/)
-target_link_libraries(scope PRIVATE ${QWT} Qt5::Widgets fwLib fwcomm)
+find_library(FWLIB fwLib ../lib/bld)
+find_library(FWCOMM fwcomm ../../artix7_v1/fw/modules/usbadc-support/sw/)
+target_link_libraries(scope PRIVATE ${QWT} Qt5::Widgets ${FWLIB} ${FWCOMM})
