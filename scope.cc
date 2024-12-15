@@ -236,6 +236,12 @@ public:
 		return leds_;
 	}
 
+	SlowDACPtr
+	slowDAC()
+	{
+		return dac_;
+	}
+
 	QwtPlotZoomer *
 	getZoom();
 
@@ -347,6 +353,7 @@ class NPreTriggerSamples;
 class Decimation;
 class Measurement;
 class MeasDiff;
+class CalDAC;
 
 class ValChangedVisitor
 {
@@ -367,6 +374,7 @@ public:
 	virtual void visit(Decimation         *) {}
 	virtual void visit(Measurement        *) {}
 	virtual void visit(MeasDiff           *) {}
+	virtual void visit(CalDAC             *) {}
 };
 
 template <typename T>
@@ -1772,6 +1780,38 @@ public:
 	}
 };
 
+class CalDAC : public DblParamValidator {
+private:
+	unsigned channel_;
+	double   val_;
+public:
+	CalDAC( QLineEdit *edt, Scope *scp, unsigned channel )
+	: DblParamValidator( edt, scp, -1.0, 1.0 ),
+	  channel_(channel)
+	{
+		val_ = getVal();
+		getAction();
+	}
+
+	virtual unsigned
+	getChannel() const
+	{
+		return channel_;
+	}
+
+	virtual double
+	getVal() const override
+	{
+		return scp_->slowDAC()->getVolt( channel_ );
+	}
+
+	virtual void accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+};
+
+
 class NPreTriggerSamples : public DblParamValidator, public MovableMarker, public ValChangedVisitor {
 private:
 	int npts_;
@@ -2112,6 +2152,12 @@ public:
 	{
 		scp_->setDecimation( decm->getInt() );
 	}
+
+	virtual void visit(CalDAC *dac) override
+	{
+		scp_->slowDAC()->setVolt( dac->getChannel(), dac->getDbl() );
+	}
+
 };
 
 
@@ -2355,6 +2401,26 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 			formLay->addRow( hbx.release() );
 		}
 	}
+
+	bool dacHasTitle = false;
+	for ( int ch = 0; ch < numChannels(); ch++ ) {
+		QString styleString( QString("color: ") + vChannelColors_[ch].name() );
+		std::unique_ptr<CalDAC> dac;
+		try {
+			editWid  = unique_ptr<QLineEdit>  ( new QLineEdit() );
+			editWid->setStyleSheet( styleString );
+			dac = unique_ptr<CalDAC> ( new CalDAC( editWid.release(), this, ch ) );
+			dac->subscribe( paramUpd_ );
+		} catch ( std::runtime_error & ) {}
+		if ( dac ) {
+			if ( ! dacHasTitle ) {
+				formLay->addRow( new QLabel( "Calibration DAC:" ) );
+				dacHasTitle = true;
+			}
+			formLay->addRow( new QLabel( *getChannelName( ch ) ), dac.release()->getEditWidget() );
+		}
+	}
+
     auto meas1 = new MeasMarker( this, QColor( Qt::green ) );
     meas1->attach( plot_ );
 	vMeasMark_.push_back( meas1 );
@@ -2631,9 +2697,9 @@ Scope::updateHScale()
 void
 Scope::updateVScale(int ch)
 {
-	double att = pga_->getDBAtt( ch );
+	double att = pga()->getDBAtt( ch );
 	try {
-		if ( fec_->getAttenuator( ch ) ) {
+		if ( fec()->getAttenuator( ch ) ) {
 			att += 20.0;
 		}
 	} catch ( std::runtime_error &e ) {
