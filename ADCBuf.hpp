@@ -60,6 +60,9 @@ public:
 		npts_  = npts;
 		sync_  = sync;
 		scale_ = scale;
+		if ( nelms > stride_ ) {
+			throw std::runtime_error("nelms exceeds allowed maximum");
+		}
 		nelms_ = (nelms ? nelms : stride_);
 	}
 
