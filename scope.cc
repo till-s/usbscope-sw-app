@@ -158,6 +158,9 @@ public:
 	void
 	updateVScale(int channel);
 
+	double
+	getTriggerOffset(BufPtr);
+
 	void
 	updateHScale();
 
@@ -2639,6 +2642,11 @@ Scope::newData(BufPtr buf)
 
 	unsigned hdr = buf->getHdr();
 
+	double triggerOffset = getTriggerOffset( buf );
+	for ( int i = 0; i < nsmpl_; i++ ) {
+		xRange_[i] = (double)i - triggerOffset;
+	}
+
 	for ( int ch = 0; ch < vPltCurv_.size(); ch++ ) {
 		// samples
 		vPltCurv_ [ch]->setRawSamples( xRange_, buf->getData( ch ), buf->getNElms() );
@@ -2718,6 +2726,51 @@ Scope::updateHScale()
 
 	axisHScl_->setRawOffset( npts );
 	axisHScl_->setScale( getNSamples() * decm / getADCClkFreq() );
+}
+
+// crude/linear interpolation of the precise trigger point
+// (between samples). Used to adjust the horizontal axis.
+
+double
+Scope::getTriggerOffset(BufPtr buf)
+{
+	unsigned      npts = acq()->getNPreTriggerSamples();
+	TriggerSource src;
+	acq()->getTriggerSrc( &src, nullptr );
+	double        lvl  = acq()->getTriggerLevelPercent()/100.0;
+	lvl *= ( acq()->getBufSampleSize() > 1 ? 32767.0 : 127.0 );
+	int           ch   = -1;
+
+	double        lo, hi;
+
+	lo = hi = lvl;
+
+	switch ( src ) {
+		case CHA: ch = 0; break;
+		case CHB: ch = 1; break;
+		default: break;
+	}
+	if ( ch >= 0 ) {
+		if ( npts > 0 ) {
+			lo = buf->getData(ch)[npts - 1];
+			hi = buf->getData(ch)[npts];
+		} else {
+			// extrapolate
+			lo = buf->getData(ch)[0];
+			hi = buf->getData(ch)[1];
+		}
+	}
+	if ( hi < lo ) {
+		// falling edge
+		double tmp = hi;
+		hi = lo;
+		lo = tmp;
+	}
+	if ( hi == lo ) {
+		return 0.0;
+	}
+	// linear interpolation (if we missed the trigger point -> extrapolation)
+	return (lvl - lo)/(hi-lo);
 }
 
 void
