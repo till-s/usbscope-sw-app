@@ -1823,7 +1823,7 @@ public:
 	virtual double
 	getVal() const override
 	{
-		return scp_->slowDAC()->getVolt( channel_ );
+		return scp_->slowDAC()->getVolts( channel_ );
 	}
 
 	virtual void accept(ValChangedVisitor *v) override
@@ -2176,7 +2176,7 @@ public:
 
 	virtual void visit(CalDAC *dac) override
 	{
-		scp_->slowDAC()->setVolt( dac->getChannel(), dac->getDbl() );
+		scp_->slowDAC()->setVolts( dac->getChannel(), dac->getDbl() );
 	}
 
 };
