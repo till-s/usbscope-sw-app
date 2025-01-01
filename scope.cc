@@ -2734,32 +2734,35 @@ Scope::updateHScale()
 double
 Scope::getTriggerOffset(BufPtr buf)
 {
-	unsigned      npts = acq()->getNPreTriggerSamples();
+	/* Skip interpolation if this is an auto-triggered buffer ! */
+	if ( ( buf->getHdr() & FW_BUF_HDR_FLG_AUTO_TRIGGERED ) ) {
+		return 0.0;
+	}
+
 	TriggerSource src;
 	acq()->getTriggerSrc( &src, nullptr );
-	double        lvl  = acq()->getTriggerLevelPercent()/100.0;
-	lvl *= ( acq()->getBufSampleSize() > 1 ? 32767.0 : 127.0 );
-	int           ch   = -1;
 
-	double        lo, hi;
-
-	lo = hi = lvl;
-
+	int           ch;
 	switch ( src ) {
 		case CHA: ch = 0; break;
 		case CHB: ch = 1; break;
-		default: break;
+		default: // other sources => no interpolation
+			return 0.0;
 	}
-	if ( ch >= 0 ) {
-		if ( npts > 0 ) {
-			lo = buf->getData(ch)[npts - 1];
-			hi = buf->getData(ch)[npts];
-		} else {
-			// extrapolate
-			lo = buf->getData(ch)[0];
-			hi = buf->getData(ch)[1];
-		}
+
+	unsigned      npts = acq()->getNPreTriggerSamples();
+
+	double        lo, hi;
+
+	if ( npts > 0 ) {
+		lo = buf->getData(ch)[npts - 1];
+		hi = buf->getData(ch)[npts];
+	} else {
+		// extrapolate
+		lo = buf->getData(ch)[0];
+		hi = buf->getData(ch)[1];
 	}
+
 	if ( hi < lo ) {
 		// falling edge
 		double tmp = hi;
@@ -2769,6 +2772,9 @@ Scope::getTriggerOffset(BufPtr buf)
 	if ( hi == lo ) {
 		return 0.0;
 	}
+
+	double        lvl  = acq()->getTriggerLevelPercent()/100.0;
+	lvl *= ( acq()->getBufSampleSize() > 1 ? 32767.0 : 127.0 );
 	// linear interpolation (if we missed the trigger point -> extrapolation)
 	return (lvl - lo)/(hi-lo);
 }
