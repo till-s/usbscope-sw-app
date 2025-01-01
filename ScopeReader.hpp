@@ -6,6 +6,7 @@
 #include <AcqCtrl.hpp>
 #include <mutex>
 #include <DataReadyEvent.hpp>
+#include <BoardRef.hpp>
 
 class ReadBufIF {
 public:
@@ -81,7 +82,7 @@ class ScopeReader : public QThread {
 	
 public:
 	ScopeReader(
-		FWPtr                   fwp,
+		BoardInterface         *brd,
 		BufPoolPtr              bufPool,
 		ScopeReaderCmdPipePtr   pipe,
 		QObject                *notifed,

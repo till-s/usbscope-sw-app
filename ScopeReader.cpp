@@ -7,14 +7,14 @@
 using std::string;
 
 ScopeReader::ScopeReader(
-		FWPtr                  fwp,
+		BoardInterface        *brd,
 		BufPoolPtr             bufPool,
 		ScopeReaderCmdPipePtr  pipe,
 		QObject               *notified,
 		QObject               *parent
 )
 : QThread       ( parent   ),
-  acq_          ( fwp      ),
+  acq_          ( brd      ),
   bufPool_      ( bufPool  ),
   pipe_         ( pipe     ),
   notified_     ( notified ),
