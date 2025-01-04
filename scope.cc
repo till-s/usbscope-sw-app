@@ -2949,6 +2949,24 @@ Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, MeasMark
 	}
 }
 
+static void
+usage(const char *nm)
+{
+	printf("usage: %s [-hsr] [-d <tty_device>] [-n <num_samples>] [-S <full_scale_volts>]\n", nm);
+	printf("  -h                  : Print this message.\n");
+    printf("  -d tty_device       : Path to TTY device (defaults to '/dev/ttyACM0').\n");
+	printf("  -S full_scale_volts : Change scale to 'full_scale_volts' (at 0dB\n");
+	printf("                        attenuation).\n");
+	printf("  -n num_samples      : Set number of samples to use (defaults to zero\n");
+	printf("                        which lets the app pick a default).\n");
+	printf("  -s                  : Simulation mode (connect to 'CommandWrapperSim'\n");
+	printf("                        simulated HDL app; most likely you also need\n");
+	printf("                        -d to point to the correct PTY device).\n");
+	printf("  -r                  : Refrain from resetting the device to a safe mode\n");
+	printf("                        upon quitting the application. By default a safe\n");
+	printf("                        state (maximize all attenuators, remove termination\n");
+	printf("                        etc. is programmed).\n");
+}
 
 int
 main(int argc, char **argv)
@@ -2968,17 +2986,19 @@ double      scale    = -1.0;
 
 	QApplication app(argc, argv);
 
-	while ( (opt = getopt( argc, argv, "d:sn:S:r" )) > 0 ) {
+	while ( (opt = getopt( argc, argv, "hd:sn:S:r" )) > 0 ) {
 		u_p = 0;
 		d_p = 0;
 		switch ( opt ) {
 			case 'd': fnam = optarg;     break;
+			case 'h': usage( argv[0] );  return 0;
 			case 's': sim  = true;       break;
 			case 'n': u_p  = &nsamples;  break;
 			case 'S': d_p  = &scale;     break;
 			case 'r': safeQuit = false;  break;
 			default:
 				fprintf(stderr, "Error: Unknown option -%c\n", opt);
+				usage( argv[0] );
 				return 1;
 		}
 		if ( u_p && 1 != sscanf( optarg, "%i", u_p ) ) {
