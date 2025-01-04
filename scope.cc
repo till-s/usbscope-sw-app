@@ -102,6 +102,21 @@ public:
 	virtual void updateScale(ScaleXfrm *) = 0;
 };
 
+class CloseMainEventFilter : public QObject
+{
+protected:
+    bool eventFilter(QObject * obj, QEvent * event) override
+    {
+        if (event->type() == QEvent::Close)
+        {
+            printf( "CLOSING\n" );
+			fflush( stdout );
+        }
+
+        return QObject::eventFilter(obj, event);
+    }
+};
+
 class Scope : public QObject, public Board, public ScaleXfrmCallback {
 private:
 	constexpr static int                  CHA_IDX    = 0;
@@ -142,6 +157,7 @@ private:
 	QwtPlotPicker                        *picker_;
 	TrigLevel                            *trigLvl_;
     ParamUpdateVisitor                   *paramUpd_;
+	bool                                  safeQuit_ {true};
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
@@ -168,6 +184,18 @@ public:
 	numChannels() const
 	{
 		return vChannelNames_.size();
+	}
+
+	bool
+	getSafeQuit() const
+	{
+		return safeQuit_;
+	}
+
+	void
+	setSafeQuit( bool val )
+	{
+		safeQuit_ = val;
 	}
 
 	void startReader(unsigned poolDepth = 4);
@@ -230,6 +258,9 @@ public:
 	FECPtr
 	fec()
 	{
+		if ( ! fec_ ) {
+			throw std::runtime_error("No FEC available");
+		}
 		return fec_;
 	}
 
@@ -312,8 +343,36 @@ public:
 	updateNPreTriggerSamples(unsigned npts);
 
 	void
+	bringIntoSafeState()
+	{
+		int maxAtt;
+		pga()->getDBRange( nullptr, &maxAtt );
+		for ( auto ch = 0; ch < getNumChannels(); ++ch ) {
+			try {
+				fec()->setTermination( ch, false );
+			} catch ( std::runtime_error &err ) {
+			}
+			try {
+				fec()->setAttenuator( ch, true );
+			} catch ( std::runtime_error &err ) {
+			}
+			try {
+				fec()->setACMode( ch, true );
+			} catch ( std::runtime_error &err ) {
+			}
+			try {
+				pga()->setDBAtt( ch, maxAtt );
+			} catch ( std::runtime_error &err ) {
+			}
+		}
+	}
+
+	void
 	quit()
 	{
+		if ( getSafeQuit() ) {
+			bringIntoSafeState();
+		}
 		exit(0);
 	}
 
@@ -332,12 +391,25 @@ public:
 
 	virtual void
 	updateScale( ScaleXfrm * );
-
 	double
 	getSample(int channel, int idx, bool decNorm);
 
 	QString
 	smplToString(int channel, int idx);
+
+protected:
+	// override from QObject
+    bool eventFilter(QObject * obj, QEvent * event) override
+    {
+        if (event->type() == QEvent::Close)
+        {
+			if ( getSafeQuit() ) {
+				bringIntoSafeState();
+			}
+        }
+
+        return QObject::eventFilter(obj, event);
+    }
 };
 
 class TrigSrcMenu;
@@ -2530,6 +2602,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto centWid  = unique_ptr<QWidget>    ( new QWidget()     );
 	centWid->setLayout( horzLay.release() );
 	mainWid->setCentralWidget( centWid.release() );
+	mainWid->installEventFilter( this );
 	mainWin_.swap( mainWid );
 
 // no point creating these here; they need to be recreated every time anything that affects
@@ -2883,6 +2956,7 @@ main(int argc, char **argv)
 const char *fnam     = getenv("FWCOMM_DEVICE");
 bool        sim      = false;
 unsigned    nsamples = 0;
+bool        safeQuit = true;
 int         opt;
 unsigned   *u_p;
 double     *d_p;
@@ -2894,7 +2968,7 @@ double      scale    = -1.0;
 
 	QApplication app(argc, argv);
 
-	while ( (opt = getopt( argc, argv, "d:sn:S:" )) > 0 ) {
+	while ( (opt = getopt( argc, argv, "d:sn:S:r" )) > 0 ) {
 		u_p = 0;
 		d_p = 0;
 		switch ( opt ) {
@@ -2902,6 +2976,7 @@ double      scale    = -1.0;
 			case 's': sim  = true;       break;
 			case 'n': u_p  = &nsamples;  break;
 			case 'S': d_p  = &scale;     break;
+			case 'r': safeQuit = false;  break;
 			default:
 				fprintf(stderr, "Error: Unknown option -%c\n", opt);
 				return 1;
@@ -2967,6 +3042,7 @@ double      scale    = -1.0;
 			sc.setVoltScale( i, scale );
 		}
 	}
+	sc.setSafeQuit( safeQuit );
 
 	sc.startReader();
 
