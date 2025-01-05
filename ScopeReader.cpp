@@ -58,7 +58,7 @@ ScopeReader::run()
 	unsigned       got   = 0;
 	uint16_t       hdr;
 
-	while ( 1 ) {
+	while ( ! cmd.stop_ ) {
 
 		if ( ! buf ) {
 			buf = bufPool_->get();

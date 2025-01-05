@@ -17,12 +17,14 @@ struct ScopeReaderCmd {
 	unsigned npts_;
 	unsigned decm_;
 	double   scal_;
+    bool     stop_;
 
 	ScopeReaderCmd()
-	: sync_ ( 0   ),
-	  npts_ ( 0   ),
-	  decm_ ( 1   ),
-	  scal_ ( 1.0 )
+	: sync_ ( 0     ),
+	  npts_ ( 0     ),
+	  decm_ ( 1     ),
+	  scal_ ( 1.0   ),
+	  stop_ ( false )
 	{
 	}
 };

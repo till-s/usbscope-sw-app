@@ -199,6 +199,7 @@ public:
 	}
 
 	void startReader(unsigned poolDepth = 4);
+	void stopReader();
 
 	ScaleXfrm *
 	axisVScl(int channel)
@@ -370,9 +371,16 @@ public:
 	void
 	quit()
 	{
+		stopReader();
 		if ( getSafeQuit() ) {
 			bringIntoSafeState();
 		}
+	}
+
+	void
+	quitAndExit()
+	{
+		quit();
 		exit(0);
 	}
 
@@ -403,9 +411,7 @@ protected:
     {
         if (event->type() == QEvent::Close)
         {
-			if ( getSafeQuit() ) {
-				bringIntoSafeState();
-			}
+			quit();
         }
 
         return QObject::eventFilter(obj, event);
@@ -2309,7 +2315,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto fileMen  = menuBar->addMenu( "File" );
 
 	auto act      = unique_ptr<QAction>( new QAction( "Quit" ) );
-	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quit );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quitAndExit );
 	fileMen->addAction( act.release() );
 
 	mainWid->setMenuBar( menuBar.release() );
@@ -2761,6 +2767,14 @@ Scope::startReader(unsigned poolDepth)
 	bufPool->add( poolDepth );
 	reader_ = new ScopeReader( unlockedPtr(), bufPool, pipe_, this );
 	reader_->start();
+}
+
+void
+Scope::stopReader()
+{
+	cmd_.stop_ = true;
+	pipe_->sendCmd( &cmd_ );
+	reader_->wait();
 }
 
 void
