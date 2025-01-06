@@ -1317,6 +1317,7 @@ class MeasMarker : public MovableMarker, public ValUpdater, public ValChangedVis
 	Scope   *scp_;
 	QColor  color_;
 	QString style_;
+	QString xposAsString_;
 public:
 	MeasMarker(Scope *scp, const QColor &color = QColor())
 	: scp_  ( scp   ),
@@ -1346,6 +1347,12 @@ public:
 	}
 
 	using MovableMarker::setLabel;
+
+	virtual const QString &
+	xposToString() const
+	{
+		return xposAsString_;
+	}
 
 	virtual void setLabel( double xpos )
 	{
@@ -1385,6 +1392,10 @@ public:
 			setLabelAlignment( Qt::AlignRight );
 		}
 		setValue( point );
+		double tVal = scp_->axisHScl()->linr( xValue(), false );
+		auto p = scp_->axisHScl()->normalize( tVal );
+		xposAsString_ = QString::asprintf("%5.3f", tVal*p.first) + p.second;
+
 		valChanged();
 	}
 
@@ -1535,7 +1546,11 @@ public:
 
 	virtual void visit(MeasMarker *mrk) override
 	{
-		setText( scp_->smplToString( ch_, mrk->xValue() ) );
+		if ( ch_ < 0 ) {
+			setText( mrk->xposToString() );
+		} else {
+			setText( scp_->smplToString( ch_, mrk->xValue() ) );
+		}
 	}
 
 	virtual void visit(MeasDiff *md) override
@@ -2970,8 +2985,8 @@ Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, MeasMark
 	grid->addWidget( tit, row, col, Qt::AlignLeft );
 	++col;
 	for ( int ch = -1; ch < (int) numChannels(); ch++ ) {
-		if ( -1 != ch || md ) {
-			// ch == -1 creates a deltaX label when dealing with a MeasDiff
+		if ( -1 != ch || md || mrk ) {
+			// ch == -1 creates a deltaX/X label when dealing with a MeasDiff or MeasMarker
 			auto lbl   = unique_ptr<MeasLbl>( new MeasLbl( this, ch ) );
 			if ( ch >= 0 ) {
 				lbl->setStyleSheet( vChannelStyles_[ch] );
