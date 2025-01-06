@@ -1574,7 +1574,7 @@ private:
 
 public:
 	TrigLevel( QLineEdit *edt, Scope *scp )
-	: ParamValidator( edt, new QDoubleValidator(-100.0,100.0,-1) ),
+	: ParamValidator( edt, new QDoubleValidator(-100.0,100.0,3) ),
 	  MovableMarker(       ),
       scp_         ( scp   )
 	{
