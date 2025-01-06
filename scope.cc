@@ -780,6 +780,23 @@ printf("horz max %lf\n", tmp > max ? tmp : max );
 	}
 
 	void
+	keepToRect(QPointF *p)
+	{
+		if ( p->x() < rect_.left() ) {
+			p->setX( rect_.left() );
+		}
+		if ( p->x() > rect_.right() ) {
+			p->setX( rect_.right() );
+		}
+		if ( p->y() < rect_.top() ) {
+			p->setY( rect_.top() );
+		}
+		if ( p->y() > rect_.bottom() ) {
+			p->setY( rect_.bottom() );
+		}
+	}
+
+	void
 	setColor(QColor *color)
 	{
 		color_ = color;
@@ -1351,9 +1368,12 @@ public:
 	}
 #endif
 
-	virtual void update( const QPointF & point ) override
+	virtual void update( const QPointF & pointOrig ) override
 	{
+		QPointF point( pointOrig );
+		scp_->axisHScl()->keepToRect( &point );
 		MovableMarker::update( point );
+
 		setLabel( point.x() );
 		if        ( point.y() >  scp_->axisVScl( CHA )->rawScale()/3.0 ) {
 			setLabelAlignment( Qt::AlignTop );
@@ -1663,8 +1683,11 @@ public:
 	}
 
 	virtual void
-	update( const QPointF & point ) override
+	update( const QPointF & pointOrig ) override
 	{
+		QPointF point( pointOrig );
+		scp_->axisHScl()->keepToRect( &point );
+		MovableMarker::update( point );
 		// store absolute volts and percentage
         vlt_ = raw2Volt( point.y() , false );
 		lvl_ = raw2Percent( point.y() );
@@ -1973,8 +1996,11 @@ linv:  (t - off)*rscl/scl + roff
 	}
 
 	virtual void
-	update( const QPointF & point ) override
+	update( const QPointF & pointOrig ) override
 	{
+		QPointF point( pointOrig );
+		scp_->axisHScl()->keepToRect( &point );
+		MovableMarker::update( point );
 		// store absolute volts and percentage
         val_  = scp_->axisHScl()->linr( point.x() );
 		npts_ = round( point.x() );
