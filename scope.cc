@@ -103,6 +103,12 @@ public:
 	virtual void updateScale(ScaleXfrm *) = 0;
 };
 
+class KeyPressCallback {
+public:
+	virtual void handleKeyPress(int key) = 0;
+};
+
+
 class CloseMainEventFilter : public QObject
 {
 protected:
@@ -118,7 +124,7 @@ protected:
     }
 };
 
-class Scope : public QObject, public Board, public ScaleXfrmCallback {
+class Scope : public QObject, public Board, public ScaleXfrmCallback, public KeyPressCallback {
 private:
 	constexpr static int                  CHA_IDX    = 0;
 	constexpr static int                  CHB_IDX    = 1;
@@ -214,6 +220,7 @@ public:
 
 	void startReader(unsigned poolDepth = 4);
 	void stopReader();
+	void clf();
 
 	ScaleXfrm *
 	axisVScl(int channel)
@@ -441,6 +448,9 @@ public:
 	QString
 	smplToString(int channel, int idx);
 
+	virtual void
+	handleKeyPress( int key ) override;
+
 protected:
 	// override from QObject
     bool eventFilter(QObject * obj, QEvent * event) override
@@ -527,6 +537,7 @@ typedef Dispatcher<ValChangedVisitor> ValUpdater;
 class ScopeZoomer : public QwtPlotZoomer {
 private:
 	std::vector< std::pair< MovableMarker*, int > > markers_;
+	std::vector< KeyPressCallback * >               keyHandlers_;
 public:
 	ScopeZoomer( int xAxisId, int yAxisId, QWidget *canvas )
 	: QwtPlotZoomer( xAxisId, yAxisId, canvas )
@@ -571,6 +582,9 @@ public:
 					(*it).first->update( pf );
 				}
 			}
+			for ( auto it = keyHandlers_.begin(); it != keyHandlers_.end(); ++it ) {
+				(*it)->handleKeyPress( ke->key() );
+			}
 		}
 		QwtPlotZoomer::widgetKeyPressEvent( ke );
 	}
@@ -585,6 +599,12 @@ public:
 			}
 		}
 		markers_.push_back( std::pair<MovableMarker*,int>( m, key ) );
+	}
+
+	virtual void
+	registerKeyPressCallback( KeyPressCallback *d )
+	{
+		keyHandlers_.push_back( d );
 	}
 };
 
@@ -901,6 +921,13 @@ public:
 			menu->addAction( act );
 		}
 		setMenu( menu );
+		QObject::connect( this, &QPushButton::clicked, this, &MenuButton::clicked );
+	}
+
+	virtual void
+	clicked(bool checked)
+	{
+		printf("Button clicked %d\n", checked);
 	}
 
 	virtual void
@@ -1236,6 +1263,9 @@ public:
 			state_ = SINGLE;
 		} else {
 			state_ = OFF;
+		}
+		if ( state_ != OFF ) {
+			scp_->clf();
 		}
 		MenuButton::notify( act );
 	}
@@ -2620,6 +2650,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	vMarkers.push_back( meas2 );
 	lzoom_->attachMarker( meas2, Qt::Key_2 );
 
+	lzoom_->registerKeyPressCallback( this );
+
 	auto measDiff = std::unique_ptr<MeasDiff>( new MeasDiff( meas1, meas2 ) );
 	vMeasDiff_.push_back( measDiff.get() );
 
@@ -2839,6 +2871,14 @@ Scope::newData(BufPtr buf)
 }
 
 void
+Scope::clf()
+{
+	for ( int ch = 0; ch < vPltCurv_.size(); ch++ ) {
+		vPltCurv_[ch]->setRawSamples( nullptr, nullptr, 0 );
+	}
+}
+
+void
 Scope::startReader(unsigned poolDepth)
 {
 	if ( reader_ ) {
@@ -3044,6 +3084,18 @@ Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, MeasMark
 			grid->addWidget( lbl.release(), row, col, Qt::AlignRight );
 		}
 		++col;
+	}
+}
+
+void
+Scope::handleKeyPress( int key )
+{
+	switch ( key ) {
+		case Qt::Key_C:
+			clf();
+			break;
+		default:
+			break;
 	}
 }
 
