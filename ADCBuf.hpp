@@ -21,6 +21,7 @@ private:
 	double                 std_[NCH];   // measurement (std-dev)
 	bool                   mVld_[NCH];  // measurement valid flag
 	unsigned               sync_;       // count/flag that can be used to sync parameter changes across fifo domains
+	unsigned               decm_;
 	T                      data_[];
 
 	ADCBuf(const ADCBuf &)    = delete;
@@ -46,7 +47,8 @@ public:
 
 	ADCBuf(const Key &k, unsigned stride)
 	: stride_    ( stride ),
-      scale_     ( 1.0    )
+      scale_     ( 1.0    ),
+      decm_      ( 1      )
 	{
 		for (int i = 0; i < NCH; i++ ) {
 			mVld_[i] = false;
@@ -54,11 +56,12 @@ public:
 	}
 
 	void
-	initHdr(unsigned hdr, unsigned npts, unsigned sync, double scale = 1.0, unsigned nelms = 0)
+	initHdr(unsigned hdr, unsigned npts, unsigned sync, unsigned decm, double scale = 1.0, unsigned nelms = 0)
 	{
 		hdr_   = hdr;
 		npts_  = npts;
 		sync_  = sync;
+		decm_  = decm;
 		scale_ = scale;
 		if ( nelms > stride_ ) {
 			throw std::runtime_error("nelms exceeds allowed maximum");
@@ -67,49 +70,55 @@ public:
 	}
 
 	unsigned
-	getHdr()
+	getHdr() const
 	{
 		return hdr_;
 	}
 
 	unsigned
-	getNumChannels()
+	getNumChannels() const
 	{
 		return NCH;
 	}
 
 	unsigned
-	getSize()
+	getSize() const
 	{
 		return stride_ * NCH;
 	}
 
 	unsigned
-	getSync()
+	getSync() const
 	{
 		return sync_;
 	}
 
 	unsigned
-	getNElms()
+	getNElms() const
 	{
 		return nelms_;
 	}
 
 	unsigned
-	getMaxNElms()
+	getMaxNElms() const
 	{
 		return stride_;
 	}
 
 	unsigned
-	getNPreTriggerSamples()
+	getNPreTriggerSamples() const
 	{
 		return npts_;
 	}
 
+	unsigned
+	getDecimation() const
+	{
+		return decm_;
+	}
+
 	double
-	getScale()
+	getScale() const
 	{
 		return scale_;
 	}
