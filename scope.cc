@@ -14,6 +14,7 @@
 #include <QPushButton>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFileDialog>
 
 #include <QState>
 #include <QStateMachine>
@@ -158,6 +159,7 @@ private:
 	TrigLevel                            *trigLvl_;
     ParamUpdateVisitor                   *paramUpd_;
 	bool                                  safeQuit_ {true};
+	string                                saveToDir_ {"."};
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
@@ -196,6 +198,18 @@ public:
 	setSafeQuit( bool val )
 	{
 		safeQuit_ = val;
+	}
+
+	const string &
+	getSaveToDir() const
+	{
+		return saveToDir_;
+	}
+
+	void
+	setSaveToDir(const std::string &val)
+	{
+		saveToDir_ = val;
 	}
 
 	void startReader(unsigned poolDepth = 4);
@@ -382,6 +396,28 @@ public:
 	{
 		quit();
 		exit(0);
+	}
+
+	void
+	saveToFile()
+	{
+		BufPtr data = curBuf_;
+		if ( ! data ) {
+			message( "Have no data to save" );
+			return;
+		}
+		string fileName = QFileDialog::getSaveFileName( mainWin_.get(), "Save Waveform", saveToDir_.c_str(), "(*.h5 *.hdf5)" ).toStdString();
+		if ( fileName.empty() ) {
+			return;
+		}
+		auto slash = fileName.find_last_of( '/' );
+		if ( std::string::npos == slash ) {
+			saveToDir_ = string(".");
+		} else {
+			// remember selected directory for next time
+			saveToDir_ = fileName.substr( 0, slash );
+			message( "Saving not implemented yet" );
+		}
 	}
 
 	virtual bool
@@ -2355,7 +2391,11 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto menuBar  = unique_ptr<QMenuBar>( new QMenuBar() );
 	auto fileMen  = menuBar->addMenu( "File" );
 
-	auto act      = unique_ptr<QAction>( new QAction( "Quit" ) );
+	auto act      = unique_ptr<QAction>( new QAction( "Save Waveform To" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::saveToFile );
+	fileMen->addAction( act.release() );
+
+	act           = unique_ptr<QAction>( new QAction( "Quit" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quitAndExit );
 	fileMen->addAction( act.release() );
 
@@ -3010,7 +3050,7 @@ Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, MeasMark
 static void
 usage(const char *nm)
 {
-	printf("usage: %s [-hsr] [-d <tty_device>] [-n <num_samples>] [-S <full_scale_volts>]\n", nm);
+	printf("usage: %s [-hsr] [-d <tty_device>] [-n <num_samples>] [-p <hdf5_path>] [-S <full_scale_volts>]\n", nm);
 	printf("  -h                  : Print this message.\n");
     printf("  -d tty_device       : Path to TTY device (defaults to '/dev/ttyACM0').\n");
 	printf("  -S full_scale_volts : Change scale to 'full_scale_volts' (at 0dB\n");
@@ -3020,6 +3060,8 @@ usage(const char *nm)
 	printf("  -s                  : Simulation mode (connect to 'CommandWrapperSim'\n");
 	printf("                        simulated HDL app; most likely you also need\n");
 	printf("                        -d to point to the correct PTY device).\n");
+	printf("  -p hdf5_path        : Path where to store HDF5 waveforms (starting\n");
+	printf("                        point for navigation in GUI; defaults to '.').\n");
 	printf("  -r                  : Refrain from resetting the device to a safe mode\n");
 	printf("                        upon quitting the application. By default a safe\n");
 	printf("                        state (maximize all attenuators, remove termination\n");
@@ -3033,6 +3075,7 @@ const char *fnam     = getenv("FWCOMM_DEVICE");
 bool        sim      = false;
 unsigned    nsamples = 0;
 bool        safeQuit = true;
+const char *path     = nullptr;
 int         opt;
 unsigned   *u_p;
 double     *d_p;
@@ -3044,16 +3087,17 @@ double      scale    = -1.0;
 
 	QApplication app(argc, argv);
 
-	while ( (opt = getopt( argc, argv, "hd:sn:S:r" )) > 0 ) {
+	while ( (opt = getopt( argc, argv, "d:hn:p:rsS:" )) > 0 ) {
 		u_p = 0;
 		d_p = 0;
 		switch ( opt ) {
 			case 'd': fnam = optarg;     break;
 			case 'h': usage( argv[0] );  return 0;
-			case 's': sim  = true;       break;
 			case 'n': u_p  = &nsamples;  break;
-			case 'S': d_p  = &scale;     break;
+			case 'p': path     = optarg; break;
 			case 'r': safeQuit = false;  break;
+			case 's': sim  = true;       break;
+			case 'S': d_p  = &scale;     break;
 			default:
 				fprintf(stderr, "Error: Unknown option -%c\n", opt);
 				usage( argv[0] );
@@ -3121,6 +3165,9 @@ double      scale    = -1.0;
 		}
 	}
 	sc.setSafeQuit( safeQuit );
+	if ( path ) {
+		sc.setSaveToDir( path );
+	}
 
 	sc.startReader();
 
