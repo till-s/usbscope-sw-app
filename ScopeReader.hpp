@@ -1,10 +1,12 @@
 #pragma once
 
+#include <mutex>
+#include <type_traits>
+
 #include <Scope.hpp>
 #include <QApplication>
 #include <QThread>
 #include <AcqCtrl.hpp>
-#include <mutex>
 #include <DataReadyEvent.hpp>
 #include <BoardRef.hpp>
 
@@ -61,8 +63,7 @@ public:
 		BufType::ElementType *dptr = dst->getData( ch );
 		T                    *sptr = &buf_[ ch ];
 		while ( nelms > 0 ) {
-			*dptr = (decltype(*dptr)) *sptr;
-			*dptr = (double) *sptr;
+			*dptr = static_cast< std::remove_reference<decltype(*dptr)>::type >( *sptr );
 			dptr++;
 			sptr += BufPoolType::NumChannels;
 			nelms--;
