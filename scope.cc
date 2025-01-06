@@ -2992,6 +2992,9 @@ Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, MeasMark
 				lbl->setStyleSheet( vChannelStyles_[ch] );
 			}
 			lbl->setAlignment( Qt::AlignRight );
+			lbl->setText( "-000.00MHzx" );
+			QSize sz( lbl->sizeHint() );
+			lbl->setFixedWidth( sz.width() );
 			if ( md ) {
 				md->subscribe( lbl.get() );
 			} else if ( mrk ) {
