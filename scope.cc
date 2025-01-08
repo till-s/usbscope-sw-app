@@ -28,6 +28,8 @@
 #include <getopt.h>
 #include <FWComm.hpp>
 #include <Board.hpp>
+#include <H5Smpl.hpp>
+
 #include <vector>
 #include <string>
 #include <utility>
@@ -408,8 +410,8 @@ public:
 	void
 	saveToFile()
 	{
-		BufPtr data = curBuf_;
-		if ( ! data ) {
+		BufPtr buf = curBuf_;
+		if ( ! buf ) {
 			message( "Have no data to save" );
 			return;
 		}
@@ -423,7 +425,15 @@ public:
 		} else {
 			// remember selected directory for next time
 			saveToDir_ = fileName.substr( 0, slash );
-			message( "Saving not implemented yet" );
+			try {
+				typedef H5Smpl::Dimension Dim;
+				std::vector<Dim> dims;
+				dims.push_back( Dim().max( buf->getNumChannels() ) );
+				dims.push_back( Dim().max( buf->getMaxNElms() ).cnt( buf->getNElms() ) );
+				H5Smpl h5f( fileName, buf->getData(0), dims );
+			} catch ( std::runtime_error &e ) {
+				message( e.what() );
+			}
 		}
 	}
 
