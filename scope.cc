@@ -430,7 +430,18 @@ public:
 				std::vector<Dim> dims;
 				dims.push_back( Dim().max( buf->getNumChannels() ) );
 				dims.push_back( Dim().max( buf->getMaxNElms() ).cnt( buf->getNElms() ) );
-				H5Smpl h5f( fileName, buf->getData(0), dims );
+				unsigned precision = 16;
+#if 0
+				// could not get type-conversion (double->int16) AND
+				// nbit compression to work in one go.
+				try {
+					precision = getSampleSize();
+				} catch ( std::runtime_error &e ) {
+					precision = 16;
+				}
+#endif
+				unsigned offset = 16 - precision;
+				H5Smpl h5f( fileName, INT16_T, DOUBLE_T, offset, precision, dims, buf->getData(0) );
 			} catch ( std::runtime_error &e ) {
 				message( e.what() );
 			}

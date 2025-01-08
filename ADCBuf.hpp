@@ -3,6 +3,7 @@
 #include <BufPool.hpp>
 #include <math.h>
 #include <memory>
+#include <vector>
 
 using std::shared_ptr;
 
@@ -16,7 +17,7 @@ private:
 	unsigned               nelms_;      // # valid elements (per channel)
 	unsigned               npts_;       // # pre-trigger samples
 	unsigned               hdr_;        // header received from ADC 
-	double                 scale_;      // current scale factor
+	double                 scale_[NCH]; // current scale factors
 	double                 avg_[NCH];   // measurement (avg)
 	double                 std_[NCH];   // measurement (std-dev)
 	bool                   mVld_[NCH];  // measurement valid flag
@@ -47,22 +48,24 @@ public:
 
 	ADCBuf(const Key &k, unsigned stride)
 	: stride_    ( stride ),
-      scale_     ( 1.0    ),
       decm_      ( 1      )
 	{
 		for (int i = 0; i < NCH; i++ ) {
-			mVld_[i] = false;
+			mVld_ [i] = false;
+			scale_[i] = 1.0;
 		}
 	}
 
 	void
-	initHdr(unsigned hdr, unsigned npts, unsigned sync, unsigned decm, double scale = 1.0, unsigned nelms = 0)
+	initHdr(unsigned hdr, unsigned npts, unsigned sync, unsigned decm, const double scale[NCH], unsigned nelms = 0)
 	{
 		hdr_   = hdr;
 		npts_  = npts;
 		sync_  = sync;
 		decm_  = decm;
-		scale_ = scale;
+		for ( auto i = 0; i < NCH; ++i ) {
+			scale_[i] = scale[i];
+		}
 		if ( nelms > stride_ ) {
 			throw std::runtime_error("nelms exceeds allowed maximum");
 		}
