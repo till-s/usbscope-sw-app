@@ -121,10 +121,24 @@ public:
 	}
 
 	double
+	getScale(unsigned ch) const
+	{
+		if ( ch >= NCH ) {
+			abort();
+		}
+		return scale_[ch];
+	}
+
+	std::vector<double>
 	getScale() const
 	{
-		return scale_;
+		std::vector<double> v;
+		for ( auto ch = 0; ch < NCH; ++ch ) {
+			v.push_back(scale_[ch]);
+		}
+		return v;
 	}
+
 
 	void
 	measure();

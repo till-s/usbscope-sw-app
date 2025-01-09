@@ -442,6 +442,13 @@ public:
 #endif
 				unsigned offset = 16 - precision;
 				H5Smpl h5f( fileName, INT16_T, DOUBLE_T, offset, precision, dims, buf->getData(0) );
+
+				std::vector<double> scl( buf->getScale() );
+				h5f.addAttribute( "scaleVolt",            scl );
+				h5f.addAttribute( "decimation",           buf->getDecimation() );
+				h5f.addAttribute( "clockFrequencyHz",     getADCClkFreq() );
+				h5f.addAttribute( "samplingTimeSec",      buf->getDecimation()/getADCClkFreq() );
+				h5f.addAttribute( "numPreTriggerSamples", buf->getNPreTriggerSamples() );
 			} catch ( std::runtime_error &e ) {
 				message( e.what() );
 			}
@@ -3021,6 +3028,8 @@ Scope::updateVScale(int ch)
 	}
 	double scl = getVoltScale( ch ) * exp10(att/20.0);
 	vAxisVScl_[ch]->setScale( scl );
+	cmd_.scal_[ch] = scl/vAxisVScl_[ch]->rawScale();
+	postSync();
 }
 
 void
