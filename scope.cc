@@ -33,7 +33,6 @@
 #include <QFinalState>
 #include <QFuture>
 #include <QFutureWatcher>
-#include <QKeyEvent>
 
 #include <qwt_plot.h>
 #include <qwt_plot_zoomer.h>
@@ -45,7 +44,6 @@
 #include <qwt_scale_engine.h>
 #include <qwt_picker_machine.h>
 #include <qwt_plot_curve.h>
-#include <qwt_scale_draw.h>
 #include <qwt_scale_widget.h>
 
 #include <FWComm.hpp>
@@ -56,6 +54,8 @@
 #include <ScopeReader.hpp>
 #include <Scope.hpp>
 #include <MovableMarkers.hpp>
+#include <KeyPressCallback.hpp>
+#include <ScopeZoomer.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
@@ -94,7 +94,6 @@ public:
 class ScaleXfrm;
 class TrigArmMenu;
 class TrigSrcMenu;
-class ScopeZoomer;
 class TrigLevel;
 class ParamUpdateVisitor;
 class MeasMarker;
@@ -105,11 +104,6 @@ class ScaleXfrm;
 class ScaleXfrmCallback {
 public:
 	virtual void updateScale(ScaleXfrm *) = 0;
-};
-
-class KeyPressCallback {
-public:
-	virtual void handleKeyPress(int key) = 0;
 };
 
 
@@ -584,80 +578,6 @@ public:
 };
 
 typedef Dispatcher<ValChangedVisitor> ValUpdater;
-
-class ScopeZoomer : public QwtPlotZoomer {
-private:
-	std::vector< std::pair< MovableMarker*, int > > markers_;
-	std::vector< KeyPressCallback * >               keyHandlers_;
-public:
-	ScopeZoomer( int xAxisId, int yAxisId, QWidget *canvas )
-	: QwtPlotZoomer( xAxisId, yAxisId, canvas )
-	{
-		setKeyPattern( QwtEventPattern::KeyRedo, Qt::Key_I );
-		setKeyPattern( QwtEventPattern::KeyUndo, Qt::Key_O );
-
-		setMousePattern( QwtEventPattern::MouseSelect1, Qt::LeftButton,   Qt::ShiftModifier );
-		setMousePattern( QwtEventPattern::MouseSelect2, Qt::MiddleButton, Qt::ShiftModifier );
-		setMousePattern( QwtEventPattern::MouseSelect3, Qt::RightButton,  Qt::ShiftModifier );
-	}
-
-	virtual QwtText
-	trackerText( const QPoint &point ) const override
-	{
-		static QString sep("/");
-		QPointF pointf( invTransform( point ) );
-		return QwtText(
-			plot()->axisScaleDraw( plot()->xBottom )->label( pointf.x() ).text()
-			+ sep +
-			plot()->axisScaleDraw( plot()->yLeft )->label( pointf.y() ).text()
-			+ sep +
-			plot()->axisScaleDraw( plot()->yRight)->label( pointf.y() ).text()
-		);
-	}
-
-	virtual void
-	widgetKeyPressEvent( QKeyEvent *ke ) override
-	{
-		if ( ! isActive() ) {
-			for ( auto it = markers_.begin(); it != markers_.end(); ++it ) {
-				if ( (*it).second == ke->key() ) {
-					QWidget *w = plot()->canvas();
-					QPoint   p = w->mapFromGlobal( QCursor::pos() );
-					if ( w->geometry().contains( p ) ) {
-						printf("Contains\n");
-					} else {
-						p.setX( (w->geometry().left() + w->geometry().right())/2 );
-						p.setY( (w->geometry().top() + w->geometry().bottom())/2 );
-					}
-					const QPointF pf( invTransform( p ) );
-					(*it).first->update( pf );
-				}
-			}
-			for ( auto it = keyHandlers_.begin(); it != keyHandlers_.end(); ++it ) {
-				(*it)->handleKeyPress( ke->key() );
-			}
-		}
-		QwtPlotZoomer::widgetKeyPressEvent( ke );
-	}
-
-	virtual void
-	attachMarker( MovableMarker *m, int key )
-	{
-		for ( auto it = markers_.begin(); it != markers_.end(); ++it ) {
-			if ( (*it).second == key ) {
-				(*it).first = m;
-				return;
-			}
-		}
-		markers_.push_back( std::pair<MovableMarker*,int>( m, key ) );
-	}
-
-	virtual void
-	registerKeyPressCallback( KeyPressCallback *d )
-	{
-		keyHandlers_.push_back( d );
-	}
-};
 
 class ScaleXfrm : public QObject, public QwtScaleDraw, public ValUpdater {
 	double              rscl_;

@@ -18,6 +18,7 @@ set(SRCS
 	"SysPipe.cpp"
 	"ScopeReader.cpp"
 	"MovableMarkers.cpp"
+	"ScopeZoomer.cpp"
 )
 
 set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm)
