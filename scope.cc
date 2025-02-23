@@ -1,3 +1,15 @@
+#include <stdio.h>
+#include <getopt.h>
+#include <math.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#include <memory>
+#include <vector>
+#include <string>
+#include <utility>
+#include <list>
+
 #include <QApplication>
 #include <QMainWindow>
 #include <QMenuBar>
@@ -23,20 +35,6 @@
 #include <QFutureWatcher>
 #include <QKeyEvent>
 
-#include <memory>
-#include <stdio.h>
-#include <getopt.h>
-#include <FWComm.hpp>
-#include <Board.hpp>
-#include <H5Smpl.hpp>
-
-#include <vector>
-#include <string>
-#include <utility>
-#include <list>
-#include <math.h>
-#include <stdlib.h>
-
 #include <qwt_plot.h>
 #include <qwt_plot_zoomer.h>
 #include <qwt_plot_picker.h>
@@ -49,6 +47,10 @@
 #include <qwt_plot_curve.h>
 #include <qwt_scale_draw.h>
 #include <qwt_scale_widget.h>
+
+#include <FWComm.hpp>
+#include <Board.hpp>
+#include <H5Smpl.hpp>
 
 #include <DataReadyEvent.hpp>
 #include <ScopeReader.hpp>
@@ -367,6 +369,20 @@ public:
 	updateNPreTriggerSamples(unsigned npts);
 
 	void
+	updateTriggerSrc(TriggerSource src)
+	{
+		cmd_.tsrc_ = src;
+		postSync();
+	}
+
+	void
+	updateTriggerEdge(int rising)
+	{
+		cmd_.rise_ = rising;
+		postSync();
+	}
+
+	void
 	bringIntoSafeState()
 	{
 		int maxAtt;
@@ -374,6 +390,7 @@ public:
 		for ( auto ch = 0; ch < getNumChannels(); ++ch ) {
 			try {
 				fec()->setTermination( ch, false );
+				leds()->setVal( string("Term") + getChannelName( ch )->toStdString(), 0 );
 			} catch ( std::runtime_error &err ) {
 			}
 			try {
@@ -389,6 +406,8 @@ public:
 			} catch ( std::runtime_error &err ) {
 			}
 		}
+		acq()->setExtTrigOutEnable( 0 );
+		clrTrgLED();
 	}
 
 	void
@@ -444,13 +463,17 @@ public:
 				H5Smpl h5f( fileName, INT16_T, DOUBLE_T, offset, precision, dims, buf->getData(0) );
 
 				std::vector<double> scl( buf->getScale() );
-				h5f.addAttribute( "scaleVolt",            scl );
-				h5f.addAttribute( "decimation",           buf->getDecimation() );
-				h5f.addAttribute( "clockFrequencyHz",     getADCClkFreq() );
-				h5f.addAttribute( "samplingTimeSec",      buf->getDecimation()/getADCClkFreq() );
-				h5f.addAttribute( "numPreTriggerSamples", buf->getNPreTriggerSamples() );
+				h5f.addAttribute( H5K_SCALE_VOLT,         scl );
+				h5f.addAttribute( H5K_DECIMATION,         buf->getDecimation() );
+				h5f.addAttribute( H5K_CLOCK_F_HZ,         getADCClkFreq() );
+				h5f.addAttribute( H5K_NPTS,               buf->getNPreTriggerSamples() );
+				h5f.addHdrInfo( buf->getHdr(), buf->getNumChannels() );
+				h5f.addDate( buf->getTime() );
+				h5f.addTriggerSource( buf->getTriggerSource(), buf->getTriggerEdgeRising() );
 			} catch ( std::runtime_error &e ) {
 				message( e.what() );
+				// remove file if something failed
+				unlink( fileName.c_str() );
 			}
 		}
 	}
@@ -2310,6 +2333,7 @@ public:
 		src = mnu->getSrc();
 
 		scp_->acq()->setTriggerSrc( src, rising );
+		scp_->updateTriggerSrc( src );
 	}
 
 	virtual void visit( TrigEdgMenu *mnu ) override
@@ -2321,6 +2345,7 @@ public:
 		const QString &s = mnu->text();
 		rising = (s == "Rising");
 		scp_->acq()->setTriggerSrc( src, rising );
+		scp_->updateTriggerEdge( rising );
 	}
 
 	virtual void visit( TrigAutMenu *mnu ) override

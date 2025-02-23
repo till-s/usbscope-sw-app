@@ -3,6 +3,7 @@
 #include <FWComm.hpp>
 #include <ADCBuf.hpp>
 #include <SysPipe.hpp>
+#include <AcqCtrl.hpp>
 #include <QFuture>
 #include <memory>
 #include <vector>
@@ -10,29 +11,8 @@
 static  constexpr size_t FIX_HARDCODED_NCH = 2;
 
 template <size_t NCH>
-struct ScopeReaderCmdTmpl {
-	unsigned            sync_;
-	unsigned            npts_;
-	unsigned            decm_;
-	double              scal_[NCH];
-    bool                stop_;
-
-	size_t
-	numChannels()
-	{
-		return NCH;
-	}
-
-	ScopeReaderCmdTmpl()
-	: sync_ ( 0     ),
-	  npts_ ( 0     ),
-	  decm_ ( 1     ),
-	  stop_ ( false )
-	{
-		for (auto i = 0; i < NCH; ++i) {
-			scal_[i] = 1.0;
-		}
-	}
+struct ScopeReaderCmdTmpl : AcqSettings<NCH>  {
+    bool                stop_{ false };
 };
 
 typedef ScopeReaderCmdTmpl<FIX_HARDCODED_NCH> ScopeReaderCmd;

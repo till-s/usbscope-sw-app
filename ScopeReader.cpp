@@ -94,7 +94,7 @@ ScopeReader::run()
 		if ( got > 0 ) {
 			unsigned nelms = got / bytesPerSmpl_;
 			// initHdr must be called first (sets nelms_)
-			buf->initHdr( hdr, cmd.npts_, cmd.sync_, cmd.decm_, cmd.scal_, nelms );
+			buf->initHdr( cmd, hdr, nelms );
 			for ( int ch = 0; ch < bufPool_->NumChannels; ch++ ) {
 				readBuf_->copyCh( buf, ch, nelms );
 				buf->measure( ch );

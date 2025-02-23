@@ -1,28 +1,43 @@
 #pragma once
 
-#include <BufPool.hpp>
 #include <math.h>
+#include <time.h>
 #include <memory>
 #include <vector>
+#include <BufPool.hpp>
+#include <AcqCtrl.hpp>
 
 using std::shared_ptr;
+
+template <size_t NCH>
+struct AcqSettings {
+	unsigned            sync_{0};     // count/flag that can be used to sync parameter changes across fifo domains
+	unsigned            npts_{0};     // # pre-trigger samples
+	unsigned            decm_{1};     // Decimation
+	double              scal_[NCH];   // current scale factors
+	TriggerSource       tsrc_{CHA};   // trigger source
+	int                 rise_{1};     // trigger edge
+
+	size_t
+	numChannels()
+	{
+		return NCH;
+	}
+};
 
 template <typename T, size_t NCH> class ADCBufPool;
 
 template <typename T, size_t NCH = 2>
-class ADCBuf : public BufNode< ADCBuf<T> > {
+class ADCBuf : public BufNode< ADCBuf<T> >, public AcqSettings<NCH> {
 	typedef shared_ptr<ADCBuf> ADCBufPtr;
 private:
 	unsigned               stride_;     // elements in buffer: stride_*NCH
 	unsigned               nelms_;      // # valid elements (per channel)
-	unsigned               npts_;       // # pre-trigger samples
 	unsigned               hdr_;        // header received from ADC 
-	double                 scale_[NCH]; // current scale factors
 	double                 avg_[NCH];   // measurement (avg)
 	double                 std_[NCH];   // measurement (std-dev)
 	bool                   mVld_[NCH];  // measurement valid flag
-	unsigned               sync_;       // count/flag that can be used to sync parameter changes across fifo domains
-	unsigned               decm_;
+	time_t                 time_;
 	T                      data_[];
 
 	ADCBuf(const ADCBuf &)    = delete;
@@ -47,24 +62,37 @@ public:
 	};
 
 	ADCBuf(const Key &k, unsigned stride)
-	: stride_    ( stride ),
-      decm_      ( 1      )
+	: stride_    ( stride )
 	{
 		for (int i = 0; i < NCH; i++ ) {
 			mVld_ [i] = false;
-			scale_[i] = 1.0;
 		}
 	}
 
 	void
-	initHdr(unsigned hdr, unsigned npts, unsigned sync, unsigned decm, const double scale[NCH], unsigned nelms = 0)
+	initHdr(const AcqSettings<NCH> &settings, unsigned hdr, unsigned nelms = 0)
 	{
-		hdr_   = hdr;
-		npts_  = npts;
-		sync_  = sync;
-		decm_  = decm;
+		setTime();
+		this->hdr_   = hdr;
+		* static_cast< AcqSettings<NCH> *>( this ) = settings;
+		if ( nelms > stride_ ) {
+			throw std::runtime_error("nelms exceeds allowed maximum");
+		}
+		nelms_ = (nelms ? nelms : stride_);
+	}
+
+	void
+	initHdr(unsigned hdr, unsigned npts, unsigned sync, unsigned decm, const double scale[NCH], TriggerSource src, int risingEdge, unsigned nelms = 0)
+	{
+		setTime();
+		this->hdr_   = hdr;
+		this->npts_  = npts;
+		this->sync_  = sync;
+		this->decm_  = decm;
+		this->tsrc_  = src;
+		this->rise_  = risingEdge;
 		for ( auto i = 0; i < NCH; ++i ) {
-			scale_[i] = scale[i];
+			this->scal_[i] = scale[i];
 		}
 		if ( nelms > stride_ ) {
 			throw std::runtime_error("nelms exceeds allowed maximum");
@@ -93,7 +121,7 @@ public:
 	unsigned
 	getSync() const
 	{
-		return sync_;
+		return this->sync_;
 	}
 
 	unsigned
@@ -111,13 +139,13 @@ public:
 	unsigned
 	getNPreTriggerSamples() const
 	{
-		return npts_;
+		return this->npts_;
 	}
 
 	unsigned
 	getDecimation() const
 	{
-		return decm_;
+		return this->decm_;
 	}
 
 	double
@@ -126,7 +154,19 @@ public:
 		if ( ch >= NCH ) {
 			abort();
 		}
-		return scale_[ch];
+		return this->scal_[ch];
+	}
+
+	TriggerSource
+	getTriggerSource() const
+	{
+		return this->tsrc_;
+	}
+
+	bool
+	getTriggerEdgeRising() const
+	{
+		return this->rise_;
 	}
 
 	std::vector<double>
@@ -134,11 +174,28 @@ public:
 	{
 		std::vector<double> v;
 		for ( auto ch = 0; ch < NCH; ++ch ) {
-			v.push_back(scale_[ch]);
+			v.push_back(this->scal_[ch]);
 		}
 		return v;
 	}
 
+	time_t
+	getTime()
+	{
+		return time_;
+	}
+
+	void
+	setTime( time_t t )
+	{
+		time_ = t;
+	}
+
+	void
+	setTime()
+	{
+		setTime( time( nullptr ) );
+	}
 
 	void
 	measure();
