@@ -2717,14 +2717,15 @@ if ( 1 ){
     secPlot_->setAxisScaleEngine( QwtPlot::yLeft, new ScopeSclEng( fftVScl_ ) );
 
 	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( false, "Hz", this ) );
-	sclDrw->setRawScale( getNSamples()/2 - 1 );
+	sclDrw->setRawScale( getNSamples() - 1 );
 	fftHScl_      = sclDrw.get();
     updateFFTScale();
 
 	secPlot_->setAxisScaleDraw( QwtPlot::xBottom, sclDrw.get() );
 	sclDrw->setParent( secPlot_ );
 	sclDrw.release();
-	secPlot_->setAxisScale( QwtPlot::xBottom, 0,  fftHScl_->rawScale() );
+	// only half of spectrum computed/shown
+	secPlot_->setAxisScale( QwtPlot::xBottom, 0,  fftHScl_->rawScale()/2.0 );
 
 	secPlot_->setZoomBase();
 
