@@ -3,6 +3,8 @@
 #include <mutex>
 #include <type_traits>
 
+#include <fftw3.h>
+
 #include <Scope.hpp>
 #include <QApplication>
 #include <QThread>
@@ -80,6 +82,12 @@ class ScopeReader : public QThread {
 	BufPtr                      mbox_;
 	QObject                    *notified_;
 	unsigned                    bytesPerSmpl_; // for all channels
+
+	// Note: this buffer is only used to create the plan but it is
+	// also remembered by the plan; NEVER use plain fftw_execute with
+	// this plan but use the 'new array' interface!
+
+	fftw_plan                   fftwPlan_;
 	
 public:
 	ScopeReader(

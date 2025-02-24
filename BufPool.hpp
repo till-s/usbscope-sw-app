@@ -52,7 +52,7 @@ class FreeList {
 		}
 
 		virtual void *
-		pop(size_t sz)
+		pop(size_t sz, bool blocking = false)
 		{
 			void *p;
 			while ( 1 ) {
@@ -65,7 +65,11 @@ class FreeList {
 					nelm_--;
 					break;
 				}
-				cond_.wait( g );
+				if ( blocking ) {
+					cond_.wait( g );
+				} else {
+					break;
+				}
 			}
 			return p;
 		}
@@ -97,7 +101,7 @@ class FreeList {
 				::operator delete( pop( size_ ) );
 			}
 		}
-	};
+};
 
 class PoolEmpty : public std::bad_alloc {
 public:
@@ -166,7 +170,9 @@ class BufPool : public FreeList {
 
 		// when adding new elements avoid having to use a constructor;
 		// just dont' construct/destroy
-		void construct(T *) {}
+		// Do, however, initialize the memory to zero; the constructor
+		// may the reuse fields when allocating from the free list...
+		void construct(T *obj) { memset(obj, 0, sizeof(T)); }
 		void destroy(T *) {}
 	};
 
@@ -179,12 +185,21 @@ public:
 	{
 	}
 
+protected:
+	virtual BufPtr
+	add()
+	{
+		auto rv = std::allocate_shared< T, NewAlloc<T> >( NewAlloc<T>(this) );
+		added(1);
+		return rv;
+	}
+
+public:
 	virtual void
 	add(size_t n)
 	{
 		while ( n > 0 ) {
-			std::allocate_shared< T, NewAlloc<T> >( NewAlloc<T>(this) );
-			added(1);
+			add();
 			n--;
 		}
 	}

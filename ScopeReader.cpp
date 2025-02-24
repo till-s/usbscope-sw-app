@@ -27,11 +27,20 @@ ScopeReader::ScopeReader(
 	} else {
 		rbuf = std::unique_ptr<ReadBufIF>( new ReadBuf<int8_t> ( &acq_ ) );
 	}
-	readBuf_ = rbuf.release();
+	readBuf_   = rbuf.release();
+
+	BufPtr buf = bufPool_->get();
+
+	// Note: this buffer is only used to create the plan but it is
+	// also remembered by the plan; NEVER use plain fftw_execute with
+	// this plan but use the 'new array' interface!
+
+	fftwPlan_ = fftw_plan_dft_r2c_1d( buf->getMaxNElms(), buf->getData(0), buf->getFFT(0), FFTW_MEASURE | FFTW_PRESERVE_INPUT );
 }
 
 ScopeReader::~ScopeReader()
 {
+		fftw_destroy_plan( fftwPlan_ );
 		delete readBuf_;
 }
 
@@ -97,6 +106,8 @@ ScopeReader::run()
 			buf->initHdr( cmd, hdr, nelms );
 			for ( int ch = 0; ch < bufPool_->NumChannels; ch++ ) {
 				readBuf_->copyCh( buf, ch, nelms );
+				fftw_execute_dft_r2c( fftwPlan_, buf->getData( ch ), buf->getFFT( ch ) );
+				buf->computeAbsFFT( ch );
 				buf->measure( ch );
 			}
 			postMbox( &buf );

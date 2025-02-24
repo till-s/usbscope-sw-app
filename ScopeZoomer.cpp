@@ -71,3 +71,8 @@ ScopeZoomer::registerKeyPressCallback( KeyPressCallback *d )
 {
 	keyHandlers_.push_back( d );
 }
+
+ScopeZoomer::~ScopeZoomer()
+{
+	printf("zoomer destroyed\n");
+}

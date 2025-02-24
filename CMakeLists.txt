@@ -9,7 +9,7 @@ find_package(HDF5 COMPONENTS C)
 add_subdirectory(usbadc-support/sw fwcomm)
 add_subdirectory(fwcommCPP)
 
-find_library(QWT NAMES qwt qwt6 qwt-qt5)
+find_library(QWT NAMES qwt qwt6 qwt-qt5 fftw3)
 
 set(AUTOMOC ON)
 
@@ -19,9 +19,10 @@ set(SRCS
 	"ScopeReader.cpp"
 	"MovableMarkers.cpp"
 	"ScopeZoomer.cpp"
+	"ScopePlot.cpp"
 )
 
-set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm)
+set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)
 if (HDF5_FOUND)
 	list(APPEND LIBS ${HDF5_LIBRARIES})
 endif()

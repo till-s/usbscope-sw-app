@@ -26,4 +26,6 @@ public:
 
 	virtual void
 	registerKeyPressCallback( KeyPressCallback *d );
+
+	~ScopeZoomer();
 };

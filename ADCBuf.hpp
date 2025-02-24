@@ -6,6 +6,7 @@
 #include <vector>
 #include <BufPool.hpp>
 #include <AcqCtrl.hpp>
+#include <fftw3.h>
 
 using std::shared_ptr;
 
@@ -38,7 +39,11 @@ private:
 	double                 std_[NCH];   // measurement (std-dev)
 	bool                   mVld_[NCH];  // measurement valid flag
 	time_t                 time_;
-	T                      data_[];
+	struct {
+	T                      *tdom;
+	fftw_complex           *fft;
+	double                 *fftM;
+	}                      data_[NCH];
 
 	ADCBuf(const ADCBuf &)    = delete;
 
@@ -67,6 +72,13 @@ public:
 		for (int i = 0; i < NCH; i++ ) {
 			mVld_ [i] = false;
 		}
+		if ( ! data_[0].tdom ) {
+			allocData();
+		}
+	}
+
+	~ADCBuf()
+	{
 	}
 
 	void
@@ -210,7 +222,7 @@ public:
 			throw std::invalid_argument( __func__ );
 		}
 		if ( ! mVld_[ch] ) {
-			throw std::runtime_error( "measurments not available" );
+			throw std::runtime_error( "measurements not available" );
 		}
 		return avg_[ch];
 	}
@@ -222,7 +234,7 @@ public:
 			throw std::invalid_argument( __func__ );
 		}
 		if ( ! mVld_[ch] ) {
-			throw std::runtime_error( "measurments not available" );
+			throw std::runtime_error( "measurements not available" );
 		}
 		return std_[ch];
 	}
@@ -232,9 +244,64 @@ public:
 	getData(unsigned ch)
 	{
 		if ( ch < NCH ) {
-			return &data_[ stride_ * ch ];
+			return data_[ ch ].tdom;
 		}
 		throw std::invalid_argument( __func__ );
+	}
+
+	fftw_complex *
+	getFFT(unsigned ch)
+	{
+		if ( ch < NCH ) {
+			return data_[ ch ].fft;
+		}
+		throw std::invalid_argument( __func__ );
+	}
+
+	double *
+	getFFTModulus(unsigned ch)
+	{
+		if ( ch < NCH ) {
+			return data_[ ch ].fftM;
+		}
+		throw std::invalid_argument( __func__ );
+	}
+
+	void
+	computeAbsFFT(unsigned ch)
+	{
+		fftw_complex *sp = getFFT( ch );
+		double       *dp = getFFTModulus( ch );
+		double       scl = (double)nelms_/32768.0;
+		for ( size_t i = 0; i < nelms_/2 + 1; ++i ) {
+			dp[i] = log10(hypot( sp[i][0], sp[i][1] ));
+		}
+	}
+
+	void
+	allocData()
+	{
+		for ( int i = 0; i < NCH; ++i ) {
+			data_[i].tdom = fftw_alloc_real( stride_ );
+			data_[i].fft  = fftw_alloc_complex( stride_/2 + 1 );
+			data_[i].fftM = new double[ stride_/2 + 1 ];
+			if ( ! data_[i].tdom || ! data_[i].fft || ! data_[i].fftM ) {
+				throw std::runtime_error("no memory");
+			}
+		}
+	}
+
+	void
+	freeData()
+	{
+		for ( int i = 0; i < NCH; ++i ) {
+			fftw_free( data_[i].tdom );
+			data_[i].tdom = nullptr;
+			fftw_free( data_[i].fft );
+			data_[i].fft  = nullptr;
+			delete [] data_[i].fftM;
+			data_[i].fftM = nullptr;
+		}
 	}
 };
 
@@ -248,7 +315,7 @@ public:
 	const static unsigned         NumChannels = NCH;
 
 	ADCBufPool(unsigned maxNElms)
-	: BufPool< ADCBuf<T,NCH> >( maxNElms * NCH * sizeof(T) ),
+	: BufPool< ADCBuf<T,NCH> >( 0 ),
 	  maxNElms_( maxNElms )
 	{
 	}
@@ -267,6 +334,21 @@ public:
 	{
 		typename ADCBuf<T,NCH>::Key key;
 		return BufPool< ADCBuf<T, NCH> >::get( key, maxNElms_ );
+	}
+
+	virtual ~ADCBufPool()
+	{
+		// hack to destroy all
+		ADCBufPtr anchor;
+		ADCBufPtr p;
+		try {
+			while ( p = get() ) {
+				p->freeData();
+				p->next_ = anchor;
+				anchor = p;
+			}
+		} catch (PoolEmpty) {
+		}
 	}
 };
 
@@ -287,7 +369,7 @@ ADCBuf<T, NCH>::measure(unsigned ch)
 	T     *p;
 
 	y = 0.0;
-	p = data_ + ch * stride_;
+	p = getData( ch );
 
 	for ( int i = 0; i < nelms_; i++ ) {
 		y += *p++;
@@ -295,7 +377,7 @@ ADCBuf<T, NCH>::measure(unsigned ch)
 	avg_[ch]  = y/nelms_;
 
 	y = 0.0;
-	p = data_ + ch * stride_;
+	p = getData( ch );
 	for ( int i = 0; i < nelms_; i++ ) {
 		double tmp = (*p++ - avg_[ch]);
 		y += tmp*tmp;
