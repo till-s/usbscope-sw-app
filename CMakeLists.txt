@@ -21,6 +21,7 @@ set(SRCS
 	"ScopeZoomer.cpp"
 	"ScopePlot.cpp"
 	"ScaleXfrm.cpp"
+	"MessageDialog.cpp"
 )
 
 set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)

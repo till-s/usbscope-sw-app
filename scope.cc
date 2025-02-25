@@ -24,8 +24,6 @@
 #include <QLineEdit>
 #include <QValidator>
 #include <QPushButton>
-#include <QDialog>
-#include <QDialogButtonBox>
 #include <QFileDialog>
 
 #include <QState>
@@ -53,40 +51,13 @@
 #include <ScopePlot.hpp>
 #include <Dispatcher.hpp>
 #include <ScaleXfrm.hpp>
+#include <MessageDialog.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
 using std::make_shared;
 using std::vector;
 using std::string;
-
-class MessageDialog : public QDialog {
-	QLabel *lbl_;
-public:
-	MessageDialog( QWidget *parent, const QString *title = nullptr )
-	: QDialog( parent )
-	{
-		if ( title ) {
-			setWindowTitle( *title );
-		}
-		auto buttonBox = unique_ptr<QDialogButtonBox>( new QDialogButtonBox( QDialogButtonBox::Ok ) );
-		QObject::connect( buttonBox.get(), &QDialogButtonBox::accepted, this, &QDialog::accept );
-
-		auto lay       = unique_ptr<QVBoxLayout>( new QVBoxLayout() );
-		auto lbl       = unique_ptr<QLabel>     ( new QLabel()      );
-		lbl_           = lbl.get();
-		lay->addWidget( lbl.release() );
-		lay->addWidget( buttonBox.release() );
-		setLayout( lay.release() );
-	}
-
-	virtual void
-	setText(const QString &msg)
-	{
-		lbl_->setText( msg );
-	}
-
-};
 
 class TrigArmMenu;
 class TrigSrcMenu;
