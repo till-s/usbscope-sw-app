@@ -23,7 +23,6 @@
 #include <QGridLayout>
 #include <QLineEdit>
 #include <QValidator>
-#include <QPushButton>
 #include <QFileDialog>
 
 #include <QState>
@@ -52,6 +51,8 @@
 #include <Dispatcher.hpp>
 #include <ScaleXfrm.hpp>
 #include <MessageDialog.hpp>
+#include <MenuButton.hpp>
+#include <TglButton.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
@@ -480,78 +481,6 @@ protected:
     }
 };
 
-class TxtAction;
-
-class TxtActionNotify {
-public:
-	virtual void notify(TxtAction *) = 0;
-};
-
-class TxtAction : public QAction {
-	TxtActionNotify *v_;
-public:
-	TxtAction(const QString &txt, QObject *parent, TxtActionNotify *v = nullptr)
-	: QAction( txt, parent ),
-	  v_( v )
-	{
-		QObject::connect( this, &QAction::triggered, this, &TxtAction::forward );
-	}
-
-	void
-	forward(bool unused)
-	{
-		if ( v_ ) {
-			v_->notify( this );
-		}
-	}
-};
-
-class MenuButton : public QPushButton, public TxtActionNotify, public ValUpdater {
-public:
-	MenuButton( const vector<QString> &lbls, QWidget *parent )
-	: QPushButton( parent )
-	{
-		auto menu = new QMenu( this );
-		setText( lbls[0] );
-		auto it  = lbls.begin();
-		auto ite = lbls.end();
-		it++;
-		// if the first label is among the following elements
-		// it is the default/initial value
-		bool found = false;
-		while ( it != ite and ! found ) {
-			if ( lbls[0] == *it ) {
-				found = true;
-			}
-			it++;
-		}
-		it = lbls.begin();
-		if ( found ) {
-			it++;
-		}
-		while ( it != ite ) {
-			auto act = new TxtAction( *it, menu, this );
-			it++;
-			menu->addAction( act );
-		}
-		setMenu( menu );
-		QObject::connect( this, &QPushButton::clicked, this, &MenuButton::clicked );
-	}
-
-	virtual void
-	clicked(bool checked)
-	{
-		printf("Button clicked %d\n", checked);
-	}
-
-	virtual void
-	notify(TxtAction *act) override
-	{
-		setText( act->text() );
-		valChanged();
-	}
-};
-
 class TrigSrcMenu : public MenuButton {
 private:
 	Scope        *scp_;
@@ -613,56 +542,24 @@ public:
 	}
 };
 
-class TglButton : public QPushButton, public ValUpdater {
+class ScopeTglButton : public TglButton {
 protected:
-	Scope             *scp_;
-	vector<QString>    lbls_;
-	int                chnl_;
+	Scope *scp_;
 public:
-	TglButton( Scope *scp, const vector<QString> &lbls, int chnl = 0, QWidget * parent = nullptr )
-	: QPushButton( parent ),
-	  scp_  ( scp  ),
-	  lbls_ ( lbls ),
-	  chnl_ ( chnl )
+	ScopeTglButton(Scope *scp, const vector<QString> &lbls, int channel = 0, QWidget *parent = nullptr)
+	: TglButton( lbls, channel, parent ),
+	  scp_ ( scp )
 	{
-		setCheckable  ( true  );
-		setAutoDefault( false );
-		QObject::connect( this, &QPushButton::toggled, this, &TglButton::activated );
 	}
-
-	virtual int channel() const
-	{
-		return chnl_;
-	}
-
-	virtual void
-	setLbl(bool checked)
-	{
-		if ( checked ) {
-			setText( lbls_[0] );
-		} else {
-			setText( lbls_[1] );
-		}
-		setChecked( checked );
-	}
-
-	void
-	activated(bool checked)
-	{
-		setLbl( checked );
-		valChanged();
-	}
-
-	virtual bool getVal(    ) = 0;
 };
 
-class FECTerminationTgl : public TglButton {
+class FECTerminationTgl : public ScopeTglButton {
 private:
 	std::string         ledName_;
 public:
 
 	FECTerminationTgl( Scope *scp, int channel, QWidget * parent = nullptr )
-	: TglButton( scp, vector<QString>( {"50Ohm", "1MOhm" } ), channel, parent ),
+	: ScopeTglButton( scp, vector<QString>( {"50Ohm", "1MOhm" } ), channel, parent ),
 	  ledName_( std::string("Term") + scp->getChannelName( channel )->toStdString() )
 	{
 		bool v = getVal();
@@ -687,11 +584,11 @@ public:
 	}
 };
 
-class FECACCouplingTgl : public TglButton {
+class FECACCouplingTgl : public ScopeTglButton {
 public:
 
 	FECACCouplingTgl( Scope *scp, int channel, QWidget * parent = nullptr )
-	: TglButton( scp, vector<QString>( {"DC", "AC" } ), channel, parent )
+	: ScopeTglButton( scp, vector<QString>( {"DC", "AC" } ), channel, parent )
 	{
 		setLbl( getVal() );
 	}
@@ -707,11 +604,11 @@ public:
 	}
 };
 
-class FECAttenuatorTgl : public TglButton {
+class FECAttenuatorTgl : public ScopeTglButton {
 public:
 
 	FECAttenuatorTgl( Scope *scp, int channel, QWidget * parent = nullptr )
-	: TglButton( scp, vector<QString>( {"-20dB", "0dB" } ), channel, parent )
+	: ScopeTglButton( scp, vector<QString>( {"-20dB", "0dB" } ), channel, parent )
 	{
 		setLbl( getVal() );
 	}
@@ -727,10 +624,10 @@ public:
 	}
 };
 
-class ExtTrigOutEnTgl : public TglButton, public ValChangedVisitor {
+class ExtTrigOutEnTgl : public ScopeTglButton, public ValChangedVisitor {
 public:
 	ExtTrigOutEnTgl( Scope *scp, QWidget * parent = nullptr )
-	: TglButton( scp, vector<QString>( {"Output", "Input" } ), 0, parent )
+	: ScopeTglButton( scp, vector<QString>( {"Output", "Input" } ), 0, parent )
 	{
 		setLbl( getVal() );
 	}

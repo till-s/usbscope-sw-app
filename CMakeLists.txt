@@ -22,6 +22,8 @@ set(SRCS
 	"ScopePlot.cpp"
 	"ScaleXfrm.cpp"
 	"MessageDialog.cpp"
+	"MenuButton.cpp"
+	"TglButton.cpp"
 )
 
 set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)
