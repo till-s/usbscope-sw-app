@@ -25,12 +25,6 @@
 #include <QValidator>
 #include <QFileDialog>
 
-#include <QState>
-#include <QStateMachine>
-#include <QFinalState>
-#include <QFuture>
-#include <QFutureWatcher>
-
 #include <qwt_text.h>
 #include <qwt_scale_div.h>
 #include <qwt_scale_map.h>
@@ -53,6 +47,7 @@
 #include <MessageDialog.hpp>
 #include <MenuButton.hpp>
 #include <TglButton.hpp>
+#include <ParamValidator.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
@@ -795,101 +790,6 @@ public:
 	}
 };
 
-class ParamSetError {};
-
-class ParamValidator : public QValidator {
-private:
-	QLineEdit *edt_;
-
-	ParamValidator(const ParamValidator & ) = delete;
-
-	ParamValidator&
-	operator=(const ParamValidator & )      = delete;
-
-public:
-	ParamValidator( QLineEdit *edt, QValidator *parent )
-	: QValidator( parent ),
-	  edt_      ( edt    )
-	{
-		parent->setParent( edt  );
-		edt->setValidator( this );
-		QObject::connect( edt_, &QLineEdit::returnPressed, this, &ParamValidator::setAction );
-		QObject::connect( edt_, &QLineEdit::editingFinished, this, &ParamValidator::getAction );
-	}
-
-	virtual void
-	setAction()
-	{
-		try {
-			set( edt_->text() );
-		} catch ( ParamSetError &e ) {
-			getAction();
-		}
-	}
-
-	virtual void
-	getAction()
-	{
-		QString s;
-		get( s );
-		edt_->setText( s );
-	}
-
-	virtual void
-	get(QString &)       const = 0;
-
-	virtual void
-	set(const QString &)       = 0;
-
-	void
-	fixup(QString &s) const override
-	{
-		get( s );
-	}
-
-	// delegate to associated 'real' validator
-	State
-	validate( QString &s, int &pos ) const override
-	{
-		return static_cast<QValidator *>( parent() )->validate( s, pos );
-	}
-
-	QLineEdit *
-	getEditWidget() const
-	{
-		return edt_;
-	}
-};
-
-class MyVal : public ParamValidator {
-mutable int val;
-QString fmt;
-public:
-	MyVal( QLineEdit *edt )
-	: ParamValidator( edt, new QIntValidator(-10,10) )
-	{
-		val = 5;
-		fmt = "%1";
-		getAction();
-	}
-
-	void get(QString &s) const override
-	{
-		s = fmt.arg(val);
-	}
-
-	void set(const QString &s) override
-	{
-		bool ok;
-		unsigned  v = s.toUInt( &ok );
-		if ( ! ok ) {
-			throw ParamSetError();
-		} else {
-			val = v;
-		}
-	}
-};
-
 class MeasMarker : public MovableMarker, public ValUpdater, public ValChangedVisitor {
 	Scope   *scp_;
 	QColor  color_;
@@ -1398,85 +1298,13 @@ public:
 	}
 };
 
-class IntParamValidator : public ParamValidator, public ValUpdater {
-protected:
-	Scope *scp_;
-	int    val_;
-public:
-	IntParamValidator( QLineEdit *edt, Scope *scp, int min, int max )
-	: ParamValidator( edt, new QIntValidator(min, max) ),
-	  scp_(scp)
-	{
-	}
-
-	virtual int getInt() const
-	{
-		return val_;
-	}
-
-	virtual int getVal() const = 0;
-
-	virtual void setVal()
-	{
-		// default does nothing
-	}
-
-	virtual void get(QString &s) const override
-	{
-		s = QString::asprintf("%d", getVal());
-	}
-
-	virtual void set(const QString &s) override
-	{
-		unsigned n = s.toUInt();
-		val_ = n;
-		setVal();
-		valChanged();
-	}
-};
-
-class DblParamValidator : public ParamValidator, public ValUpdater {
-protected:
-	Scope *scp_;
-	double val_;
-public:
-	DblParamValidator( QLineEdit *edt, Scope *scp, double min, double max )
-	: ParamValidator( edt, new QDoubleValidator(min, max, -1) ),
-	  scp_(scp)
-	{
-	}
-
-	virtual double getDbl() const
-	{
-		return val_;
-	}
-
-	virtual double getVal() const = 0;
-
-	virtual void setVal()
-	{
-		// default does nothing
-	}
-
-	virtual void get(QString &s) const override
-	{
-		s = QString::asprintf("%lf", getVal());
-	}
-
-	virtual void set(const QString &s) override
-	{
-		printf("Set %s\n", s.toStdString().c_str());
-		val_ = s.toDouble();
-		setVal();
-		valChanged();
-	}
-};
-
-
 class Decimation : public IntParamValidator {
+private:
+	Scope *scp_;
 public:
 	Decimation( QLineEdit *edt, Scope *scp )
-	: IntParamValidator( edt, scp, 1, 16*(1<<12) )
+	: IntParamValidator( edt, 1, 16*(1<<12) ),
+	  scp_( scp )
 	{
 		val_ = getVal();
 		getAction();
@@ -1498,10 +1326,12 @@ class CalDAC : public DblParamValidator {
 private:
 	unsigned channel_;
 	double   val_;
+	Scope   *scp_;
 public:
 	CalDAC( QLineEdit *edt, Scope *scp, unsigned channel )
-	: DblParamValidator( edt, scp, -1.0, 1.0 ),
-	  channel_(channel)
+	: DblParamValidator( edt, -1.0, 1.0 ),
+	  channel_         ( channel        ),
+	  scp_             ( scp            )
 	{
 		val_ = getVal();
 		getAction();
@@ -1529,10 +1359,12 @@ public:
 class NPreTriggerSamples : public DblParamValidator, public MovableMarker, public ValChangedVisitor {
 private:
 	int npts_;
+	Scope   *scp_;
 public:
 	NPreTriggerSamples( QLineEdit *edt, Scope *scp )
-	: DblParamValidator( edt, scp, 0, scp->getNSamples() - 1 ),
-	  MovableMarker    (                                     )
+	: DblParamValidator( edt, 0, scp->getNSamples() - 1 ),
+	  MovableMarker    (                                ),
+      scp_             ( scp                            )
 	{
 		setLineStyle( QwtPlotMarker::VLine );
 		npts_ = scp_->acq()->getNPreTriggerSamples();
@@ -2737,41 +2569,6 @@ double      scale    = -1.0;
 	}
 
 
-#if 0
-	QSM *qsm = new QSM();
-	QFuture<void> fut;
-	QFuture<void> fut1;
-	QFutureWatcher<void> w;
-	QObject::connect( &w , &QFutureWatcher<void>::finished, qsm, &QSM::foo );
-
-	w.setFuture( fut );
-	w.setFuture( fut1 );
-#endif
-#if 0
-	QObject::connect( qsm , &QObject::objectNameChanged, qsm, &QSM::bar );
-
-	qsm->setObjectName( "xx" );
-	qsm->setObjectName( "" );
-#endif
-#if 0
-    QFinalState *s1 = new QFinalState();
-    QState *s0 = new QState();
-    QState *s2 = new QState(QState::ExclusiveStates, s0);
-    QState *s3 = new QState(QState::ExclusiveStates, s0);
-	QStateMachine *m = new QStateMachine();
-
-	QObject::connect( s0, &QState::initialStateChanged, qsm, &QSM::foo );
-
-	s0->setInitialState(s2);
-	s0->setInitialState(s3);
-#endif
-#if 0
-	m->addState( s1 );
-	m->setInitialState( s1 );
-	m->start();
-	printf("running: %d\n", m->isRunning());
-#endif
-#if 1
 	Scope sc( FWComm::create( fnam ), sim, nsamples );
 	if ( scale > 0.0 ) {
 		int i;
@@ -2787,8 +2584,6 @@ double      scale    = -1.0;
 	sc.startReader();
 
 	sc.show();
-#endif
-	printf("pre-exec\n");
 
 	return app.exec();
 }

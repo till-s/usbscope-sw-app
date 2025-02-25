@@ -24,6 +24,7 @@ set(SRCS
 	"MessageDialog.cpp"
 	"MenuButton.cpp"
 	"TglButton.cpp"
+	"ParamValidator.cpp"
 )
 
 set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)
