@@ -20,6 +20,7 @@ set(SRCS
 	"MovableMarkers.cpp"
 	"ScopeZoomer.cpp"
 	"ScopePlot.cpp"
+	"ScaleXfrm.cpp"
 )
 
 set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)
