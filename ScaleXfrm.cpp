@@ -35,11 +35,24 @@ LinXfrm::label(double val) const
 	return lbl;
 }
 
-ScaleXfrm::ScaleXfrm(bool vert, QString unit, ScaleXfrmCallback *cbck, QObject *parent)
-: LinXfrm ( parent           ),
+std::pair<double, const QString *>
+LinXfrm::normalize(double val)
+{
+	return std::pair<double, const QString *>( val, getUnit() );
+}
+
+std::pair<double, const QString *>
+LinXfrm::normalize(double val, double max)
+{
+	return normalize( val );
+}
+
+
+
+ScaleXfrm::ScaleXfrm(bool vert, const QString &unit, ScaleXfrmCallback *cbck, QObject *parent)
+: LinXfrm ( unit, parent     ),
   cbck_   ( cbck             ),
-  vert_   ( vert             ),
-  unit_   ( unit             )
+  vert_   ( vert             )
 {
 	for ( auto it = smlfmt_.begin(); it != smlfmt_.end(); ++it ) {
 		usml_.push_back( QString::asprintf( *it, unit.toStdString().c_str() ) );
@@ -51,7 +64,7 @@ ScaleXfrm::ScaleXfrm(bool vert, QString unit, ScaleXfrmCallback *cbck, QObject *
 	updatePlot();
 }
 
-std::pair<double, QString *>
+std::pair<double, const QString *>
 ScaleXfrm::normalize(double val, double max)
 {
 	if ( val > max ) {
@@ -76,7 +89,7 @@ ScaleXfrm::normalize(double val, double max)
 	return std::pair<double, QString*>(uscl, uptr);
 }
 
-std::pair<double, QString *>
+std::pair<double, const QString *>
 ScaleXfrm::normalize(double val)
 {
 	val = abs(val);
@@ -89,12 +102,12 @@ ScaleXfrm::updatePlot()
 	double max, tmp;
 
 	if ( vert_ ) {
-		max = abs( linr( rect_.top()   , false ) );
-		tmp = abs( linr( rect_.bottom(), false ) );
-		printf("vert max %lf, top %lf, bot %lf\n", tmp > max ? tmp : max, rect_.top(), rect_.bottom() );
+		max = abs( linr( rect().top()   , false ) );
+		tmp = abs( linr( rect().bottom(), false ) );
+		printf("vert max %lf, top %lf, bot %lf\n", tmp > max ? tmp : max, rect().top(), rect().bottom() );
 	} else {
-		max = abs( linr( rect_.left() ,  false ) );
-		tmp = abs( linr( rect_.right(),  false ) );
+		max = abs( linr( rect().left() ,  false ) );
+		tmp = abs( linr( rect().right(),  false ) );
 		printf("horz max %lf\n", tmp > max ? tmp : max );
 	}
 
@@ -111,21 +124,21 @@ ScaleXfrm::updatePlot()
 	// https://www.qtcentre.org/threads/64212-Can-an-Axis-Labels-be-Redrawn
 	invalidateCache();
 
-	//		printf( "calling updateScale (%s): l->r %f -> %f; scl %lf\n", unit_.toStdString().c_str(), rect_.left(), rect_.right(), scl_ );
+	//		printf( "calling updateScale (%s): l->r %f -> %f; scl %lf\n", unit().toStdString().c_str(), rect().left(), rect().right(), scl_ );
 	cbck_->updateScale( this );
 	valChanged();
 }
 
 void
-ScaleXfrm::setRect(const QRectF &r)
+LinXfrm::setRect(const QRectF &r)
 {
 	rect_ = r;
 	updatePlot();
-	//		printf( "setRect (%s): l->r %f -> %f\n", unit_.toStdString().c_str(), r.left(), r.right() );
+	//		printf( "setRect (%s): l->r %f -> %f\n", unit().toStdString().c_str(), r.left(), r.right() );
 }
 
 void
-ScaleXfrm::keepToRect(QPointF *p)
+LinXfrm::keepToRect(QPointF *p)
 {
 	if ( p->x() < rect_.left() ) {
 		p->setX( rect_.left() );

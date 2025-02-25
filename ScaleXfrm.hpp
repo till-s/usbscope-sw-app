@@ -13,11 +13,14 @@ class LinXfrm : public QObject, public QwtScaleDraw {
 	double              off_  {0.0};
 	double              uscl_ {1.0};
 	QColor             *color_{nullptr};
+	QRectF              rect_;
+	QString             unit_;
 public:
 
-	LinXfrm( QObject *parent = NULL )
+	LinXfrm( const QString &unit, QObject *parent = NULL )
 	: QObject ( parent           ),
-	  QwtScaleDraw()
+	  QwtScaleDraw(),
+	  unit_   ( unit             )
 	{
 	}
 
@@ -112,6 +115,32 @@ public:
 	{
 		return color_;
 	}
+
+	void
+	setRect(const QRectF &r);
+
+	const QRectF &
+	rect() const
+	{
+		return rect_;
+	}
+
+	virtual const QString *
+	getUnit() const
+	{
+		return &unit_;
+	}
+
+	virtual
+	std::pair<double, const QString *>
+	normalize(double val, double max);
+
+	virtual
+	std::pair<double, const QString *>
+	normalize(double val);
+
+	void
+	keepToRect(QPointF *p);
 };
 
 class ScaleXfrmCallback {
@@ -121,10 +150,8 @@ public:
 
 class ScaleXfrm : public LinXfrm, public ValUpdater {
 	ScaleXfrmCallback       *cbck_;
-	QRectF                   rect_;
 	bool                     vert_;
-	QString                  unit_;
-	QString                 *uptr_;
+	const QString           *uptr_;
 
 	std::vector<QString>     usml_;
 	std::vector<QString>     ubig_;
@@ -135,38 +162,36 @@ class ScaleXfrm : public LinXfrm, public ValUpdater {
 	std::vector<const char*> smlfmt_;
 
 public:
-	ScaleXfrm(bool vert, QString unit, ScaleXfrmCallback *cbck, QObject *parent = nullptr);
+	ScaleXfrm(bool vert, const QString &unit, ScaleXfrmCallback *cbck, QObject *parent = nullptr);
 
 	virtual void accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );
 	}
 
-	const QString *
-	getUnit() const
+	virtual const QString *
+	getUnit() const override
 	{
 		return uptr_;
 	}
 
 	virtual
-	std::pair<double, QString *>
-	normalize(double val, double max);
+	std::pair<double, const QString *>
+	normalize(double val, double max) override;
 
 	virtual
-	std::pair<double, QString *>
-	normalize(double val);
+	std::pair<double, const QString *>
+	normalize(double val) override;
 
 	virtual void
 	updatePlot() override;
-
-	void
-	setRect(const QRectF &r);
-
-	void
-	keepToRect(QPointF *p);
 
 	static QString *
 	noUnit();
 };
 
+struct PlotScales {
+	LinXfrm              *h {nullptr};
+	std::vector<LinXfrm*> v;
+};
 

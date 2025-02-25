@@ -25,6 +25,7 @@ set(SRCS
 	"MenuButton.cpp"
 	"TglButton.cpp"
 	"ParamValidator.cpp"
+	"MeasMarker.cpp"
 )
 
 set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)

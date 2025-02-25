@@ -952,12 +952,12 @@ public:
 
 class MeasDiff : public ValChangedVisitor, public ValUpdater {
 private:
-	Measurement           measA_;
-	Measurement           measB_;
-	std::vector<double>   diffY_;
-	std::vector<QString*> unitY_;
-	double                diffX_;
-	QString              *unitX_;
+	Measurement                 measA_;
+	Measurement                 measB_;
+	std::vector<double>         diffY_;
+	std::vector<const QString*> unitY_;
+	double                      diffX_;
+	const QString              *unitX_;
 
 public:
 	MeasDiff(MeasMarker *mrkA, MeasMarker *mrkB)
@@ -2057,7 +2057,7 @@ if ( 1 ){
 	secWid->setCentralWidget( secPlot_ );
 	secPlot_->setAxisTitle( QwtPlot::yLeft, "dBFS" );
 	double dbOff = -20.0*log10(getFullScaleTicks()*getNSamples());
-	auto xfrm = unique_ptr<LinXfrm>( new LinXfrm() );
+	auto xfrm = unique_ptr<LinXfrm>( new LinXfrm("dB") );
 	xfrm->setScale( 20.0 );
 	xfrm->setOffset( dbOff );
 	fftVScl_      = xfrm.get();
