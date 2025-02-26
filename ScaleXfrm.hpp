@@ -191,7 +191,7 @@ public:
 };
 
 struct PlotScales {
-	LinXfrm              *h {nullptr};
-	std::vector<LinXfrm*> v;
+	ScaleXfrm              *h {nullptr};
+	std::vector<ScaleXfrm*> v;
 };
 

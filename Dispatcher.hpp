@@ -2,6 +2,8 @@
 
 // Double-dispatch for value changes
 
+#include <list>
+
 class TrigSrcMenu;
 class TrigEdgMenu;
 class TrigAutMenu;

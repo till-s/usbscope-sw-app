@@ -48,6 +48,8 @@
 #include <MenuButton.hpp>
 #include <TglButton.hpp>
 #include <ParamValidator.hpp>
+#include <MeasMarker.hpp>
+#include <Measurement.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
@@ -55,12 +57,11 @@ using std::make_shared;
 using std::vector;
 using std::string;
 
+class Scope;
 class TrigArmMenu;
 class TrigSrcMenu;
 class TrigLevel;
 class ParamUpdateVisitor;
-class MeasMarker;
-class MeasDiff;
 
 class CloseMainEventFilter : public QObject
 {
@@ -75,6 +76,15 @@ protected:
 
         return QObject::eventFilter(obj, event);
     }
+};
+
+class SampleMeasurement : public Measurement {
+	Scope *scp_;
+public:
+	SampleMeasurement( Scope *scp );
+
+	virtual double
+	getRawData(unsigned ch, int idx) override;
 };
 
 class Scope : public QObject, public Board, public ScaleXfrmCallback, public KeyPressCallback {
@@ -97,8 +107,7 @@ private:
 	vector<MeasMarker*>                   vMeasMark_;
 	vector<MeasDiff*>                     vMeasDiff_;
 	shared_ptr<MessageDialog>             msgDialog_;
-	vector<ScaleXfrm*>                    vAxisVScl_;
-	ScaleXfrm                            *axisHScl_;
+	PlotScales                            plotScales_;
 	ScaleXfrm                            *fftHScl_;
 	LinXfrm                              *fftVScl_;
 	ScopeReader                          *reader_;
@@ -124,7 +133,7 @@ private:
 	mkGainControls( int channel, QColor &color );
 
 	void
-	addMeasRow(QGridLayout *, QLabel *tit, vector<QLabel *> *pv, MeasMarker *mrk = nullptr, MeasDiff *md = nullptr);
+	addMeasRow(QGridLayout *, QLabel *tit, vector<QLabel *> *pv, Measurement *msr = nullptr, MeasDiff *md = nullptr);
 
 public:
 
@@ -181,13 +190,19 @@ public:
 	ScaleXfrm *
 	axisVScl(int channel)
 	{
-		return vAxisVScl_[ channel ];
+		return plotScales_.v[ channel ];
 	}
 
 	ScaleXfrm *
 	axisHScl()
 	{
-		return axisHScl_;
+		return plotScales_.h;
+	}
+
+	const PlotScales *
+	getPlotScales()
+	{
+		return &plotScales_;
 	}
 
 	ScaleXfrm *
@@ -454,8 +469,12 @@ public:
 
 	virtual void
 	updateScale( ScaleXfrm * );
+
 	double
 	getSample(int channel, int idx, bool decNorm);
+
+	double
+	getRawSample(int channel, int idx);
 
 	QString
 	smplToString(int channel, int idx);
@@ -786,256 +805,6 @@ public:
 				case OFF       : setText("Off");        break;
 			}
 			valChanged();
-		}
-	}
-};
-
-class MeasMarker : public MovableMarker, public ValUpdater, public ValChangedVisitor {
-	Scope   *scp_;
-	QColor  color_;
-	QString style_;
-	QString xposAsString_;
-public:
-	MeasMarker(Scope *scp, const QColor &color = QColor())
-	: scp_  ( scp   ),
-	  color_( color ),
-	  style_( QString( "color: %1").arg( color_.name() ) )
-	{
-		setLineStyle( QwtPlotMarker::VLine );
-		setLinePen  ( color_               );
-	}
-
-	Scope *
-	getScope() const
-	{
-		return scp_;
-	}
-
-	const QColor &
-	getColor() const
-	{
-		return color_;
-	}
-
-	const QString &
-	getStyleSheet() const
-	{
-		return style_;
-	}
-
-	using MovableMarker::setLabel;
-
-	virtual const QString &
-	xposToString() const
-	{
-		return xposAsString_;
-	}
-
-	virtual void setLabel( double xpos )
-	{
-		auto txt = QwtText( QString::asprintf( "%5.3lf", scp_->axisHScl()->linr( xpos ) ) );
-		txt.setColor( color_ );
-		setLabel( txt );
-	}
-
-	virtual void setLabel()
-	{
-		setLabel( xValue() );
-	}
-
-#if 0
-	// trivial override does not work; alignment happens in 'drawLabel'
-	virtual void drawLabel(QPainter *painter, const QRectF &canvasRect, const QPointF &pos) const override
-	{
-		QPointF newPos( pos.x(), here_.y() );
-		MovableMarker::drawLabel(painter, canvasRect, newPos);
-	}
-#endif
-
-	virtual void update( const QPointF & pointOrig ) override
-	{
-		QPointF point( pointOrig );
-		scp_->axisHScl()->keepToRect( &point );
-		MovableMarker::update( point );
-
-		setLabel( point.x() );
-		if        ( point.y() >  scp_->axisVScl( CHA )->rawScale()/3.0 ) {
-			setLabelAlignment( Qt::AlignTop );
-		} else if ( point.y() < -scp_->axisVScl( CHA )->rawScale()/3.0 ) {
-			setLabelAlignment( Qt::AlignBottom );
-		} else if ( point.x() > scp_->axisHScl()->rawScale()/2.0 ) {
-			setLabelAlignment( Qt::AlignLeft );
-		} else {
-			setLabelAlignment( Qt::AlignRight );
-		}
-		setValue( point );
-		double tVal = scp_->axisHScl()->linr( xValue(), false );
-		auto p = scp_->axisHScl()->normalize( tVal );
-		xposAsString_ = QString::asprintf("%5.3f", tVal*p.first) + p.second;
-
-		valChanged();
-	}
-
-	virtual void updateDone() override
-	{
-	}
-
-	virtual void accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-
-	// decimation and npts changes also end up here :-)
-	virtual void visit(ScaleXfrm *xfrm) override
-	{
-		setLabel();
-	}
-};
-
-class Measurement : public ValChangedVisitor, public ValUpdater {
-	Scope                 *scp_;
-	std::vector<double>    yVals_;
-	double                 xVal_;
-public:
-	Measurement(Scope *scp)
-	: scp_(scp)
-	{
-		for ( auto ch = 0; ch < scp_->numChannels(); ++ch ) {
-			yVals_.push_back( NAN );
-		}
-	}
-
-	double
-	getX() const
-	{
-		return xVal_;
-	}
-
-	// assume index has been checked
-	double
-	getYUnsafe(unsigned ch) const
-	{
-		return yVals_[ch];
-	}
-
-	double
-	getY(unsigned ch) const
-	{
-		if ( ch >= yVals_.size() ) {
-			throw std::invalid_argument( "invalid channel idx" );
-		}
-		return getYUnsafe( ch );
-	}
-
-
-	Scope *
-	getScope() const
-	{
-		return scp_;
-	}
-
-	virtual void visit(MeasMarker *mrk) override
-	{
-		double xraw = mrk->xValue();
-		xVal_ = scp_->axisHScl()->linr( xraw, false );
-		for ( auto ch = 0; ch < scp_->numChannels(); ++ch ) {
-			yVals_[ch] = scp_->getSample( ch, round( xraw ), false );
-		}
-		valChanged();
-	}
-
-	virtual void accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-};
-
-class MeasDiff : public ValChangedVisitor, public ValUpdater {
-private:
-	Measurement                 measA_;
-	Measurement                 measB_;
-	std::vector<double>         diffY_;
-	std::vector<const QString*> unitY_;
-	double                      diffX_;
-	const QString              *unitX_;
-
-public:
-	MeasDiff(MeasMarker *mrkA, MeasMarker *mrkB)
-	: measA_( mrkA->getScope() ), measB_( mrkB->getScope() ), diffX_( NAN ), unitX_( ScaleXfrm::noUnit() )
-	{
-		for ( auto i = 0; i < mrkA->getScope()->numChannels(); ++i ) {
-			diffY_.push_back( NAN );
-			unitY_.push_back( ScaleXfrm::noUnit() );
-		}
-		mrkA->subscribe( &measA_ );
-		mrkB->subscribe( &measB_ );
-		measA_.subscribe( this );
-		measB_.subscribe( this );
-	}
-
-	QString
-	diffXToString() const
-	{
-		return QString::asprintf("%7.2f", diffX_) + *unitX_;
-	}
-
-	QString
-	diffYToString(unsigned ch) const
-	{
-		return QString::asprintf("%7.2f", diffY_[ch]) + *unitY_[ch];
-	}
-
-
-	virtual void visit(Measurement *) override
-	{
-		auto scp = measA_.getScope();
-		diffX_   = measB_.getX() - measA_.getX();
-		auto p   = scp->axisHScl()->normalize( diffX_ );
-		diffX_  *= p.first;
-		unitX_   = p.second;
-
-		for ( auto ch = 0; ch < diffY_.size(); ++ch ) {
-			diffY_[ch] = measB_.getYUnsafe( ch ) - measA_.getYUnsafe( ch );
-			p = scp->axisVScl( ch )->normalize( diffY_[ch] );
-			diffY_[ch] *= p.first;
-			unitY_[ch]  = p.second;
-		}
-		valChanged();
-	}
-
-	virtual void accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-};
-
-class MeasLbl : public QLabel, public ValChangedVisitor {
-private:
-	Scope *scp_;
-	int    ch_;
-public:
-	MeasLbl( Scope *scp, int channel, const QString &lbl = QString(), QWidget *parent = nullptr )
-	: QLabel( lbl, parent ),
-	  scp_  ( scp         ),
-	  ch_   ( channel     )
-	{
-	}
-
-	virtual void visit(MeasMarker *mrk) override
-	{
-		if ( ch_ < 0 ) {
-			setText( mrk->xposToString() );
-		} else {
-			setText( scp_->smplToString( ch_, mrk->xValue() ) );
-		}
-	}
-
-	virtual void visit(MeasDiff *md) override
-	{
-		if ( ch_ < 0 ) {
-			setText( md->diffXToString() );
-		} else {
-			setText( md->diffYToString( ch_ ) );
 		}
 	}
 };
@@ -1715,7 +1484,6 @@ public:
 Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 : QObject        ( parent   ),
   Board          ( fw, sim  ),
-  axisHScl_      ( nullptr  ),
   fftHScl_       ( nullptr  ),
   fftVScl_       ( nullptr  ),
   reader_        ( nullptr  ),
@@ -1763,7 +1531,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	for ( auto it = vChannelNames_.begin();  it != vChannelNames_.end(); ++it ) {
 		vOvrLEDNames_.push_back( string("OVR") + it->toStdString() );
 		vYScale_.push_back     ( getFullScaleTicks()               );
-		vAxisVScl_.push_back   ( nullptr                           );
+		plotScales_.v.push_back( nullptr                           );
 	}
 
 	for ( auto it = vChannelColors_.begin(); it != vChannelColors_.end(); ++it ) {
@@ -1790,45 +1558,45 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	auto sclDrw   = unique_ptr<ScaleXfrm>( new ScaleXfrm( true, "V", this ) );
 	sclDrw->setRawScale( vYScale_[CHA_IDX] );
-	vAxisVScl_[CHA_IDX] = sclDrw.get();
+	plotScales_.v[CHA_IDX] = sclDrw.get();
 	updateVScale( CHA_IDX );
 	plot_->setAxisScaleDraw( QwtPlot::yLeft, sclDrw.get() );
 	sclDrw->setParent( plot_ );
 	sclDrw->setColor( &vChannelColors_[CHA_IDX] );
 	sclDrw.release();
-	plot_->setAxisScale( QwtPlot::yLeft, -vAxisVScl_[CHA_IDX]->rawScale() - 1, vAxisVScl_[CHA_IDX]->rawScale() );
+	plot_->setAxisScale( QwtPlot::yLeft, -axisVScl(CHA_IDX)->rawScale() - 1, axisVScl(CHA_IDX)->rawScale() );
 
 	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( true, "V", this ) );
 	sclDrw->setRawScale( vYScale_[CHB_IDX] );
-	vAxisVScl_[CHB_IDX] = sclDrw.get();
+	plotScales_.v[CHB_IDX] = sclDrw.get();
 	updateVScale( CHB_IDX );
 	plot_->setAxisScaleDraw( QwtPlot::yRight, sclDrw.get() );
 	sclDrw->setParent( plot_ );
 	sclDrw->setColor( &vChannelColors_[CHB_IDX] );
 	sclDrw.release();
-	plot_->setAxisScale( QwtPlot::yRight, -vAxisVScl_[CHB_IDX]->rawScale() - 1, vAxisVScl_[CHB_IDX]->rawScale() );
+	plot_->setAxisScale( QwtPlot::yRight, -axisVScl(CHB_IDX)->rawScale() - 1, axisVScl(CHB_IDX)->rawScale() );
 	plot_->enableAxis( QwtPlot::yRight );
 
 	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( false, "s", this ) );
 	sclDrw->setRawScale( nsmpl_ - 1 );
-	axisHScl_     = sclDrw.get();
+	plotScales_.h = sclDrw.get();
     updateHScale();
 
 	plot_->setAxisScaleDraw( QwtPlot::xBottom, sclDrw.get() );
 	sclDrw->setParent( plot_ );
 	sclDrw.release();
-	plot_->setAxisScale( QwtPlot::xBottom, 0,  axisHScl_->rawScale() );
+	plot_->setAxisScale( QwtPlot::xBottom, 0,  axisHScl()->rawScale() );
 
 	// necessary after changing the axis scale
 	plot_->setZoomBase();
 
 	// connect to 'selected'; zoomed is emitted *after* the labels are painted
-	for ( auto it = vAxisVScl_.begin(); it != vAxisVScl_.end(); ++it ) {
+	for ( auto it = plotScales_.v.begin(); it != plotScales_.v.end(); ++it ) {
 		QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), *it,  &ScaleXfrm::setRect );
 		(*it)->setRect( plot_->lzoom()->zoomRect() );
 	}
-	QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), axisHScl_,  &ScaleXfrm::setRect );
-	axisHScl_->setRect( plot_->lzoom()->zoomRect() );
+	QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), axisHScl(),  &ScaleXfrm::setRect );
+	axisHScl()->setRect( plot_->lzoom()->zoomRect() );
 
 	// markers
 	vector<MovableMarker*> vMarkers;
@@ -1845,7 +1613,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	formLay->addRow( trigLvlLbl.release(), editWid.release() );
 
 	trigLvl_->subscribe( paramUpd_ );
-	for ( auto it = vAxisVScl_.begin(); it != vAxisVScl_.end(); ++it ) {
+	for ( auto it = plotScales_.v.begin(); it != plotScales_.v.end(); ++it ) {
 		(*it)->subscribe( trigLvl_ );
 	}
 
@@ -1885,7 +1653,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto trigDlyLbl   = trigDlyLblUP.get();
 	npts->subscribe( trigDlyLbl );
 	formLay->addRow( trigDlyLblUP.release(), editWid.release() );
-	axisHScl_->subscribe( npts );
+	axisHScl()->subscribe( npts );
 
 	unsigned cic0, cic1;
 	acq_.getDecimation( &cic0, &cic1 );
@@ -1965,20 +1733,22 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 		}
 	}
 
-    auto meas1 = new MeasMarker( this, QColor( Qt::green ) );
-    meas1->attach( plot_ );
-	vMeasMark_.push_back( meas1 );
-	vMarkers.push_back( meas1 );
-	plot_->lzoom()->attachMarker( meas1, Qt::Key_1 );
-    auto meas2 = new MeasMarker( this, QColor( Qt::magenta ) );
-    meas2->attach( plot_ );
-	vMeasMark_.push_back( meas2 );
-	vMarkers.push_back( meas2 );
-	plot_->lzoom()->attachMarker( meas2, Qt::Key_2 );
+	auto meas1 = unique_ptr<Measurement>( new SampleMeasurement( this ) );
+    auto mMrk1 = new MeasMarker( meas1, QColor( Qt::green ) );
+    mMrk1->attach( plot_ );
+	vMeasMark_.push_back( mMrk1 );
+	vMarkers.push_back( mMrk1 );
+	plot_->lzoom()->attachMarker( mMrk1, Qt::Key_1 );
+	auto meas2 = unique_ptr<Measurement>( new SampleMeasurement( this ) );
+    auto mMrk2 = new MeasMarker( meas2, QColor( Qt::magenta ) );
+    mMrk2->attach( plot_ );
+	vMeasMark_.push_back( mMrk2 );
+	vMarkers.push_back( mMrk2 );
+	plot_->lzoom()->attachMarker( mMrk2, Qt::Key_2 );
 
 	plot_->lzoom()->registerKeyPressCallback( this );
 
-	auto measDiff = std::unique_ptr<MeasDiff>( new MeasDiff( meas1, meas2 ) );
+	auto measDiff = std::unique_ptr<MeasDiff>( new MeasDiff( mMrk1->getMeasurement(), mMrk2->getMeasurement() ) );
 	vMeasDiff_.push_back( measDiff.get() );
 
 	formLay->addRow( new QLabel( "Measurements:" ) );
@@ -1986,7 +1756,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	for (auto i = 0; i < vMeasMark_.size(); ++i ) {
 		auto tit = unique_ptr<QLabel>( new QLabel( QString( "Mark%1" ).arg(i) ) );
 		tit->setStyleSheet( vMeasMark_[i]->getStyleSheet() );
-		addMeasRow( grid.get(), tit.get(), &vMeasLbls_, vMeasMark_[i] );
+		addMeasRow( grid.get(), tit.get(), &vMeasLbls_, vMeasMark_[i]->getMeasurement() );
 		tit.release();
 	}
 	addMeasRow( grid.get(), new QLabel( "M1-M0" ), &vMeasLbls_, nullptr, measDiff.get() );
@@ -2088,9 +1858,9 @@ if ( 1 ){
 // no point creating these here; they need to be recreated every time anything that affects
 // the scale changes; happens in Scope::updateScale() [also the reason why they ended up
 // here at the end -- setting early missed any changes to the scale at a later point] :-(
-//	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( vAxisVScl_[CHA_IDX] ) );
-//	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( vAxisVScl_[CHB_IDX] ) );
-//	plot_->setAxisScaleEngine( QwtPlot::xBottom, new ScopeSclEng( axisHScl_     ) );
+//	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( axisVScl(CHA_IDX) ) );
+//	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( axisVScl(CHB_IDX) ) );
+//	plot_->setAxisScaleEngine( QwtPlot::xBottom, new ScopeSclEng( axisHScl()     ) );
 
     paramUpd.release();
 	xRange.release();
@@ -2212,7 +1982,7 @@ Scope::newData(BufPtr buf)
 
 		// measurements
 
-		auto xfrm = vAxisVScl_[ch];
+		auto xfrm = axisVScl(ch);
 
 		vMeanLbls_[ch]->setText( QString::asprintf("%7.2f", xfrm->linr(buf->getAvg(ch))) + *xfrm->getUnit() );
 		vStdLbls_ [ch]->setText( QString::asprintf("%7.2f", xfrm->linr(buf->getStd(ch))) + *xfrm->getUnit() );
@@ -2305,8 +2075,8 @@ Scope::updateHScale()
 
 	double   npts = acq_.getNPreTriggerSamples();
 
-	axisHScl_->setRawOffset( npts );
-	axisHScl_->setScale( getNSamples() * decm / getADCClkFreq() );
+	axisHScl()->setRawOffset( npts );
+	axisHScl()->setScale( getNSamples() * decm / getADCClkFreq() );
 }
 
 void
@@ -2383,8 +2153,8 @@ Scope::updateVScale(int ch)
 		// no FEC attenuator
 	}
 	double scl = getVoltScale( ch ) * exp10(att/20.0);
-	vAxisVScl_[ch]->setScale( scl );
-	cmd_.scal_[ch] = scl/vAxisVScl_[ch]->rawScale();
+	axisVScl(ch)->setScale( scl );
+	cmd_.scal_[ch] = scl/axisVScl(ch)->rawScale();
 	postSync();
 }
 
@@ -2394,13 +2164,13 @@ Scope::updateScale( ScaleXfrm *xfrm )
 	auto plot = plot_;
 	int       axId;
 	QColor   *color = nullptr;
-	if ( xfrm == vAxisVScl_[CHA_IDX] ) {
+	if ( xfrm == axisVScl(CHA_IDX) ) {
 		axId  = QwtPlot::yLeft;
 		color = &vChannelColors_[CHA_IDX];
-	} else if ( xfrm == vAxisVScl_[CHB_IDX] ) {
+	} else if ( xfrm == axisVScl(CHB_IDX) ) {
 		axId  = QwtPlot::yRight;
 		color = &vChannelColors_[CHB_IDX];
-	} else if ( xfrm == axisHScl_ ) {
+	} else if ( xfrm == axisHScl() ) {
 		axId = QwtPlot::xBottom;
 	} else if ( xfrm == fftHScl_ ) {
 		axId = QwtPlot::xBottom;
@@ -2427,7 +2197,7 @@ Scope::updateScale( ScaleXfrm *xfrm )
 }
 
 double
-Scope::getSample(int channel, int idx, bool decNorm)
+Scope::getRawSample(int channel, int idx)
 {
 	if ( channel < 0 || channel >= numChannels() || ! curBuf_  ) {
 		return NAN;
@@ -2437,8 +2207,14 @@ Scope::getSample(int channel, int idx, bool decNorm)
 	} else if ( idx >= nsmpl_ ) {
 		idx = nsmpl_ - 1;
 	}
-	ScaleXfrm *xfrm = vAxisVScl_[channel];
-	return xfrm->linr(curBuf_->getData(channel)[idx], decNorm);
+	return curBuf_->getData(channel)[idx];
+}
+
+double
+Scope::getSample(int channel, int idx, bool decNorm)
+{
+	ScaleXfrm *xfrm = axisVScl(channel);
+	return xfrm->linr( getRawSample(channel,idx), decNorm);
 }
 
 QString
@@ -2448,21 +2224,22 @@ Scope::smplToString(int channel, int idx)
 	if ( isnan( v ) ) {
 		return QString();
 	}
-	ScaleXfrm *xfrm = vAxisVScl_[channel];
+	ScaleXfrm *xfrm = axisVScl(channel);
 	return QString::asprintf("%7.2f", v) + *xfrm->getUnit();
 }
 
 void
-Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, MeasMarker *mrk, MeasDiff *md)
+Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, Measurement *msr, MeasDiff *md)
 {
 	int row = grid->rowCount();
 	int col = 0;
 	grid->addWidget( tit, row, col, Qt::AlignLeft );
 	++col;
 	for ( int ch = -1; ch < (int) numChannels(); ch++ ) {
-		if ( -1 != ch || md || mrk ) {
+		if ( -1 != ch || md || msr ) {
 			// ch == -1 creates a deltaX/X label when dealing with a MeasDiff or MeasMarker
-			auto lbl   = unique_ptr<MeasLbl>( new MeasLbl( this, ch ) );
+			auto lbl   = unique_ptr<MeasLbl>( new MeasLbl( ch ) );
+			lbl->setDbg( tit->text().toLatin1().data() ); 
 			if ( ch >= 0 ) {
 				lbl->setStyleSheet( vChannelStyles_[ch] );
 			}
@@ -2472,8 +2249,8 @@ Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, MeasMark
 			lbl->setFixedWidth( sz.width() );
 			if ( md ) {
 				md->subscribe( lbl.get() );
-			} else if ( mrk ) {
-				mrk->subscribe( lbl.get() );
+			} else if ( msr ) {
+				msr->subscribe( lbl.get() );
 			}
 			pv->push_back( lbl.get() );
 			grid->addWidget( lbl.release(), row, col, Qt::AlignRight );
@@ -2492,6 +2269,18 @@ Scope::handleKeyPress( int key )
 		default:
 			break;
 	}
+}
+
+SampleMeasurement::SampleMeasurement( Scope *scp )
+: Measurement( scp->getPlotScales() ),
+  scp_       ( scp                  )
+{
+}
+
+double
+SampleMeasurement::getRawData(unsigned ch, int idx)
+{
+	return scp_->getRawSample( ch, idx );	
 }
 
 static void
