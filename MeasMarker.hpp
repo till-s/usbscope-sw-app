@@ -67,12 +67,6 @@ public:
 	{
 	}
 
-	virtual void valChanged() override
-	{
-		printf("MeasMarker::valChanged\n");
-		ValUpdater::valChanged();
-	}
-
 	virtual void accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );

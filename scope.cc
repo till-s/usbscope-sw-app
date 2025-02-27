@@ -109,7 +109,7 @@ private:
 	shared_ptr<MessageDialog>             msgDialog_;
 	PlotScales                            plotScales_;
 	ScaleXfrm                            *fftHScl_;
-	LinXfrm                              *fftVScl_;
+	ScaleXfrm                            *fftVScl_;
 	ScopeReader                          *reader_;
 	BufPtr                                curBuf_;
 	// qwt 6.1 does not have setRawSamples(float*,int) :-(
@@ -1827,7 +1827,7 @@ if ( 1 ){
 	secWid->setCentralWidget( secPlot_ );
 	secPlot_->setAxisTitle( QwtPlot::yLeft, "dBFS" );
 	double dbOff = -20.0*log10(getFullScaleTicks()*getNSamples());
-	auto xfrm = unique_ptr<LinXfrm>( new LinXfrm("dB") );
+	auto xfrm = unique_ptr<ScaleXfrm>( new ScaleXfrm( true, "dB", this ) );
 	xfrm->setScale( 20.0 );
 	xfrm->setOffset( dbOff );
 	fftVScl_      = xfrm.get();
@@ -2172,6 +2172,9 @@ Scope::updateScale( ScaleXfrm *xfrm )
 		color = &vChannelColors_[CHB_IDX];
 	} else if ( xfrm == axisHScl() ) {
 		axId = QwtPlot::xBottom;
+	} else if ( xfrm == fftVScl_ ) {
+		axId = QwtPlot::yLeft;
+		plot = secPlot_;
 	} else if ( xfrm == fftHScl_ ) {
 		axId = QwtPlot::xBottom;
 		plot = secPlot_;
