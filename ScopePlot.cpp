@@ -3,6 +3,7 @@
 #include <memory>
 
 using std::unique_ptr;
+using std::vector;
 
 class MyPanner : public QwtPlotPanner {
 public:
@@ -68,6 +69,29 @@ size_t
 ScopePlot::numCurves()
 {
 	return vPltCurv_.size();
+}
+
+void
+ScopePlot::notifyMarkersValChanged()
+{
+	for ( auto it = vMeasMarkers_.begin(); it != vMeasMarkers_.end(); ++it ) {
+		(*it)->valChanged();
+	}
+}
+
+void
+ScopePlot::instantiateMovableMarkers()
+{
+	// So we can't use a vector<Derived*> as a vector<Base*>;
+	// don't know of a way to cast that, so we make a copy :-(
+	vector<MovableMarker*> v;
+	for ( auto it = vMeasMarkers_.begin(); it != vMeasMarkers_.end(); ++it ) {
+		v.push_back( *it );
+	}
+	for ( auto it = vMarkers_.begin(); it != vMarkers_.end(); ++it ) {
+		v.push_back( *it );
+	}
+	new MovableMarkers( this, picker(), v, this );
 }
 
 ScopePlot::~ScopePlot()

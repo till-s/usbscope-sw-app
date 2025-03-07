@@ -31,10 +31,10 @@ private:
 	
 public:
 	MovableMarkers(
-		QwtPlot                        *plot,
-		QwtPlotPicker                  *picker,
-		std::vector<MovableMarker *>    markers,
-		QObject                        *parent = NULL
+		QwtPlot                              *plot,
+		QwtPlotPicker                        *picker,
+		std::vector<MovableMarker *>         &markers,
+		QObject                              *parent = NULL
 	);
 
 	void

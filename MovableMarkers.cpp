@@ -2,10 +2,10 @@
 #include <math.h>
 
 MovableMarkers::MovableMarkers(
-	QwtPlot                        *plot,
-	QwtPlotPicker                  *picker,
-	std::vector<MovableMarker *>    markers,
-	QObject                        *parent
+	QwtPlot                              *plot,
+	QwtPlotPicker                        *picker,
+	std::vector<MovableMarker *>         &markers,
+	QObject                              *parent
 )
 : QObject   ( parent  ),
   plot_     ( plot    ),

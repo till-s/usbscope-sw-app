@@ -85,6 +85,10 @@ public:
 
 	virtual double
 	getRawData(unsigned ch, int idx) override;
+
+	static Measurement* create(Scope *scp) {
+		return new SampleMeasurement( scp );
+	}
 };
 
 class Scope : public QObject, public Board, public ScaleXfrmCallback, public KeyPressCallback {
@@ -104,8 +108,6 @@ private:
 	vector<QLabel*>                       vMeanLbls_;
 	vector<QLabel*>                       vStdLbls_;
 	vector<QLabel*>                       vMeasLbls_;
-	vector<MeasMarker*>                   vMeasMark_;
-	vector<MeasDiff*>                     vMeasDiff_;
 	shared_ptr<MessageDialog>             msgDialog_;
 	PlotScales                            plotScales_;
 	ScaleXfrm                            *fftHScl_;
@@ -134,6 +136,9 @@ private:
 
 	void
 	addMeasRow(QGridLayout *, QLabel *tit, vector<QLabel *> *pv, Measurement *msr = nullptr, MeasDiff *md = nullptr);
+
+	void
+    addMeasPair( QGridLayout *grid, ScopePlot *plot, Measurement* (*measFactory)( Scope * ) );
 
 public:
 
@@ -1599,7 +1604,6 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	axisHScl()->setRect( plot_->lzoom()->zoomRect() );
 
 	// markers
-	vector<MovableMarker*> vMarkers;
 
 	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
 	horzLay->addWidget( plot.release(), 8 );
@@ -1733,81 +1737,24 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 		}
 	}
 
-	auto meas1 = unique_ptr<Measurement>( new SampleMeasurement( this ) );
-    auto mMrk1 = new MeasMarker( meas1, QColor( Qt::green ) );
-    mMrk1->attach( plot_ );
-	vMeasMark_.push_back( mMrk1 );
-	vMarkers.push_back( mMrk1 );
-	plot_->lzoom()->attachMarker( mMrk1, Qt::Key_1 );
-	auto meas2 = unique_ptr<Measurement>( new SampleMeasurement( this ) );
-    auto mMrk2 = new MeasMarker( meas2, QColor( Qt::magenta ) );
-    mMrk2->attach( plot_ );
-	vMeasMark_.push_back( mMrk2 );
-	vMarkers.push_back( mMrk2 );
-	plot_->lzoom()->attachMarker( mMrk2, Qt::Key_2 );
-
-	plot_->lzoom()->registerKeyPressCallback( this );
-
-	auto measDiff = std::unique_ptr<MeasDiff>( new MeasDiff( mMrk1->getMeasurement(), mMrk2->getMeasurement() ) );
-	vMeasDiff_.push_back( measDiff.get() );
-
 	formLay->addRow( new QLabel( "Measurements:" ) );
 	auto grid = std::unique_ptr<QGridLayout>( new QGridLayout() );
-	for (auto i = 0; i < vMeasMark_.size(); ++i ) {
-		auto tit = unique_ptr<QLabel>( new QLabel( QString( "Mark%1" ).arg(i) ) );
-		tit->setStyleSheet( vMeasMark_[i]->getStyleSheet() );
-		addMeasRow( grid.get(), tit.get(), &vMeasLbls_, vMeasMark_[i]->getMeasurement() );
-		tit.release();
-	}
-	addMeasRow( grid.get(), new QLabel( "M1-M0" ), &vMeasLbls_, nullptr, measDiff.get() );
+
+	addMeasPair( grid.get(), plot_, SampleMeasurement::create );
+
 	addMeasRow( grid.get(), new QLabel( "Avg"   ), &vMeanLbls_ );
 	addMeasRow( grid.get(), new QLabel( "RMS"   ), &vStdLbls_  );
 
 	formLay->addRow( grid.release() );
 
-#if 0
-	for ( int ch = 0; ch < numChannels(); ch++ ) {
-		auto tit   = unique_ptr<QLabel>( new QLabel() );
-		auto lbl   = unique_ptr<QLabel>( new QLabel() );
-		auto style = QString("color: %1").arg( vChannelColors_[ch].name() );
-		auto chn   = unique_ptr<QLabel>( new QLabel() );
-		auto hlay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
-		lbl->setStyleSheet( style );
-		chn->setStyleSheet( style );
-		tit->setText( QString( "Avg" ) );
-		chn->setText( QString( *getChannelName(ch) ) );
-		lbl->setAlignment( Qt::AlignRight );
-		vMeanLbls_.push_back( lbl.get() );
-		hlay->addWidget( chn.release() );
-		hlay->addWidget( lbl.release() );
-		formLay->addRow( tit.release(), hlay.release() );
+	trigLvl_->attach( plot_ );
+	plot_->addMarker( trigLvl_ );
+	npts->attach( plot_ );
+	plot_->addMarker( npts );
 
-		lbl  = unique_ptr<QLabel>( new QLabel() );
-		tit  = unique_ptr<QLabel>( new QLabel() );
-		chn  = unique_ptr<QLabel>( new QLabel() );
-		hlay = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
-		lbl->setStyleSheet( style );
-		lbl->setStyleSheet( style );
-		chn->setStyleSheet( style );
-		tit->setText( QString( "RMS" ) );
-		chn->setText( QString( *getChannelName(ch) ) );
-		lbl->setAlignment( Qt::AlignRight );
-		vStdLbls_.push_back( lbl.get() );
-		hlay->addWidget( chn.release() );
-		hlay->addWidget( lbl.release() );
-		formLay->addRow( tit.release(), hlay.release() );
-	}
-#endif
+	plot_->instantiateMovableMarkers();
 
 	auto vertLay  = unique_ptr<QVBoxLayout>( new QVBoxLayout() );
-
-	trigLvl_->attach( plot_ );
-	vMarkers.push_back( trigLvl_ );
-	npts->attach( plot_ );
-	vMarkers.push_back( npts     );
-
-	new MovableMarkers( plot_, plot_->picker(), vMarkers, plot_ );
-
 	vertLay->addLayout( formLay.release() );
 	horzLay->addLayout( vertLay.release() );
 
@@ -1822,9 +1769,13 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 if ( 1 ){
 	auto secWid  = unique_ptr<QMainWindow>( new QMainWindow() );
+
 	secPlot_ = new ScopePlot( &vChannelColors_ );
 	printf("second plot %p\n", secPlot_);
-	secWid->setCentralWidget( secPlot_ );
+
+	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
+	horzLay->addWidget( secPlot_, 8 );
+
 	secPlot_->setAxisTitle( QwtPlot::yLeft, "dBFS" );
 	double dbOff = -20.0*log10(getFullScaleTicks()*getNSamples());
 	auto xfrm = unique_ptr<ScaleXfrm>( new ScaleXfrm( true, "dB", this ) );
@@ -1851,6 +1802,15 @@ if ( 1 ){
 	QObject::connect( secPlot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), fftHScl_,  &ScaleXfrm::setRect );
 	fftHScl_->setRect( secPlot_->lzoom()->zoomRect() );
 
+	auto formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
+
+	horzLay->addLayout( formLay.release() );
+
+	auto centWid  = unique_ptr<QWidget>    ( new QWidget()     );
+	centWid->setLayout( horzLay.release() );
+
+	secWid->setCentralWidget( centWid.release() );
+
 	xfrm.release();
 	secWin_.swap( secWid );
 }
@@ -1865,7 +1825,6 @@ if ( 1 ){
     paramUpd.release();
 	xRange.release();
 	fRange.release();
-	measDiff.release();
 }
 
 Scope::~Scope()
@@ -1878,9 +1837,6 @@ Scope::~Scope()
 	}
 	if ( paramUpd_ ) {
 		delete paramUpd_;
-	}
-	for ( auto it = vMeasDiff_.begin(); it != vMeasDiff_.end(); ++it ) {
-		delete *it;
 	}
 	printf("Leaving scope destructor\n");
 }
@@ -1996,9 +1952,7 @@ Scope::newData(BufPtr buf)
 		}
 	}
 
-	for ( auto it = vMeasMark_.begin(); it != vMeasMark_.end(); ++it ) {
-		(*it)->valChanged();
-	}
+	plot_->notifyMarkersValChanged();
 
 	leds_->setVal( "Trig", 1 );
 	lsync_ = buf->getSync();
@@ -2261,6 +2215,44 @@ Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, Measurem
 		++col;
 	}
 }
+
+	
+void
+Scope::addMeasPair( QGridLayout *grid, ScopePlot *plot, Measurement* (*measFactory)( Scope * ) )
+{
+
+    std::vector<MeasMarker *> vMeasMark;
+	auto meas1 = unique_ptr<Measurement>( measFactory( this ) );
+    auto mMrk1 = new MeasMarker( meas1, QColor( Qt::green ) );
+    mMrk1->attach( plot );
+	vMeasMark.push_back( mMrk1 );
+	plot->addMarker( mMrk1 );
+	plot->lzoom()->attachMarker( mMrk1, Qt::Key_1 );
+	auto meas2 = unique_ptr<Measurement>( measFactory( this ) );
+    auto mMrk2 = new MeasMarker( meas2, QColor( Qt::magenta ) );
+    mMrk2->attach( plot );
+	vMeasMark.push_back( mMrk2 );
+	plot->addMarker( mMrk2 );
+	plot->lzoom()->attachMarker( mMrk2, Qt::Key_2 );
+
+	plot->lzoom()->registerKeyPressCallback( this );
+
+	auto measDiff = make_shared<MeasDiff>( mMrk1->getMeasurement(), mMrk2->getMeasurement() );
+	// both measurements hold a shared_ptr to the MeasDiff so it eventually
+	// gets destroyed.
+	mMrk1->getMeasurement()->usesDiff( measDiff );
+	mMrk2->getMeasurement()->usesDiff( measDiff );
+
+	for (auto i = 0; i < vMeasMark.size(); ++i ) {
+		auto tit = unique_ptr<QLabel>( new QLabel( QString( "Mark%1" ).arg(i) ) );
+		tit->setStyleSheet( vMeasMark[i]->getStyleSheet() );
+		addMeasRow( grid, tit.get(), &vMeasLbls_, vMeasMark[i]->getMeasurement() );
+		tit.release();
+	}
+	addMeasRow( grid, new QLabel( "M1-M0" ), &vMeasLbls_, nullptr, measDiff.get() );
+}
+
+
 
 void
 Scope::handleKeyPress( int key )

@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <memory>
 
 #include <QString>
 #include <QLabel>
@@ -9,13 +10,25 @@
 #include <Dispatcher.hpp>
 #include <ScaleXfrm.hpp>
 
+class MeasDiff;
+
 class Measurement : public ValChangedVisitor, public ValUpdater {
+private:
+	// (optionally) hold a shared_ptr to a MeasDiff
+	std::shared_ptr<MeasDiff> measDiff_;
 protected:
-	const PlotScales      *scales_;
-	std::vector<double>    yVals_;
-	double                 xVal_;
+	const PlotScales         *scales_;
+	std::vector<double>       yVals_;
+	double                    xVal_;
 public:
 	Measurement(const PlotScales *scales);
+
+	void
+	usesDiff(std::shared_ptr<MeasDiff> diff)
+	{
+		// register (co-)ownership of a MeasDiff
+		measDiff_ = diff;
+	}
 
 	const PlotScales *
 	getScales() const
