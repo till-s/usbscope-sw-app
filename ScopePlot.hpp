@@ -71,8 +71,3 @@ public:
 
 	~ScopePlot();
 };
-
-
-
-
-

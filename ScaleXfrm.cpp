@@ -52,7 +52,8 @@ LinXfrm::normalize(double val, double max)
 ScaleXfrm::ScaleXfrm(bool vert, const QString &unit, ScaleXfrmCallback *cbck, QObject *parent)
 : LinXfrm ( unit, parent     ),
   cbck_   ( cbck             ),
-  vert_   ( vert             )
+  vert_   ( vert             ),
+  norm_   ( true             )
 {
 	for ( auto it = smlfmt_.begin(); it != smlfmt_.end(); ++it ) {
 		usml_.push_back( QString::asprintf( *it, unit.toStdString().c_str() ) );
@@ -99,21 +100,24 @@ ScaleXfrm::normalize(double val)
 void
 ScaleXfrm::updatePlot()
 {
-	double max, tmp;
+	if ( useNormalizedScale() ) {
+		double max, tmp;
 
-	if ( vert_ ) {
-		max = abs( linr( rect().top()   , false ) );
-		tmp = abs( linr( rect().bottom(), false ) );
-		printf("vert max %lf, top %lf, bot %lf\n", tmp > max ? tmp : max, rect().top(), rect().bottom() );
-	} else {
-		max = abs( linr( rect().left() ,  false ) );
-		tmp = abs( linr( rect().right(),  false ) );
-		printf("horz max %lf\n", tmp > max ? tmp : max );
+		if ( vert_ ) {
+			max = abs( linr( rect().top()   , false ) );
+			tmp = abs( linr( rect().bottom(), false ) );
+			printf("vert max %lf, top %lf, bot %lf\n", tmp > max ? tmp : max, rect().top(), rect().bottom() );
+		} else {
+			max = abs( linr( rect().left() ,  false ) );
+			tmp = abs( linr( rect().right(),  false ) );
+			printf("horz max %lf\n", tmp > max ? tmp : max );
+		}
+
+		auto nrm = normalize( tmp, max );
+		setNormScale( nrm.first );
+		uptr_ = nrm.second;
+
 	}
-
-	auto nrm = normalize( tmp, max );
-	setNormScale( nrm.first );
-	uptr_ = nrm.second;
 	// does not work
 	// plot_->lzoom()->plot()->updateAxes();
 
@@ -134,7 +138,7 @@ LinXfrm::setRect(const QRectF &r)
 {
 	rect_ = r;
 	updatePlot();
-	//		printf( "setRect (%s): l->r %f -> %f\n", unit().toStdString().c_str(), r.left(), r.right() );
+	printf( "setRect (%s): l->r %f -> %f\n", getUnit()->toStdString().c_str(), r.left(), r.right() );
 }
 
 void
@@ -161,3 +165,9 @@ ScaleXfrm::noUnit()
 	return &s_;
 }
 
+PlotScales::PlotScales(size_t numChannels)
+{
+	while ( numChannels-- ) {
+		v.push_back( nullptr );
+	}
+}

@@ -82,12 +82,15 @@ public:
 		return uscl_;
 	}
 
+protected:
+
 	virtual void
 	setNormScale(double uscl)
 	{
 		uscl_ = uscl;
 	}
 
+public:
 
 	virtual void
 	updatePlot()
@@ -152,6 +155,7 @@ class ScaleXfrm : public LinXfrm, public ValUpdater {
 	ScaleXfrmCallback       *cbck_;
 	bool                     vert_;
 	const QString           *uptr_;
+	bool                     norm_;
 
 	std::vector<QString>     usml_;
 	std::vector<QString>     ubig_;
@@ -175,6 +179,19 @@ public:
 		return uptr_;
 	}
 
+	virtual bool
+	useNormalizedScale() const
+	{
+		return norm_;
+	}
+
+	virtual void
+	setUseNormalizedScale( bool val )
+	{
+		norm_ = val;
+	}
+
+	
 	virtual
 	std::pair<double, const QString *>
 	normalize(double val, double max) override;
@@ -193,5 +210,7 @@ public:
 struct PlotScales {
 	ScaleXfrm              *h {nullptr};
 	std::vector<ScaleXfrm*> v;
+
+	PlotScales(size_t numChannels);
 };
 

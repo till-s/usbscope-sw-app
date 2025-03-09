@@ -12,6 +12,7 @@
 
 #include <QApplication>
 #include <QMainWindow>
+#include <QDockWidget>
 #include <QMenuBar>
 #include <QMenu>
 #include <QLabel>
@@ -91,13 +92,27 @@ public:
 	}
 };
 
+class FFTMeasurement : public Measurement {
+	Scope *scp_;
+public:
+	FFTMeasurement( Scope *scp );
+
+	virtual double
+	getRawData(unsigned ch, int idx) override;
+
+	static Measurement* create(Scope *scp) {
+		return new FFTMeasurement( scp );
+	}
+};
+
+
 class Scope : public QObject, public Board, public ScaleXfrmCallback, public KeyPressCallback {
 private:
 	constexpr static int                  CHA_IDX    = 0;
 	constexpr static int                  CHB_IDX    = 1;
+	constexpr static int                  NUM_CHNLS  = 2;
 	constexpr static int                  NSMPL_DFLT = 2048;
 	unique_ptr<QMainWindow>               mainWin_;
-	unique_ptr<QMainWindow>               secWin_;
 	ScopePlot                            *secPlot_{ nullptr };
 	unsigned                              decimation_;
 	vector<QWidget*>                      vOverRange_;
@@ -110,8 +125,7 @@ private:
 	vector<QLabel*>                       vMeasLbls_;
 	shared_ptr<MessageDialog>             msgDialog_;
 	PlotScales                            plotScales_;
-	ScaleXfrm                            *fftHScl_;
-	ScaleXfrm                            *fftVScl_;
+	PlotScales                            fftScales_;
 	ScopeReader                          *reader_;
 	BufPtr                                curBuf_;
 	// qwt 6.1 does not have setRawSamples(float*,int) :-(
@@ -144,6 +158,12 @@ public:
 
 	Scope(FWPtr fw, bool sim=false, unsigned nsamples = 0, QObject *parent = nullptr);
 	~Scope();
+
+	unique_ptr<ScopePlot>
+	mkMainPlot();
+
+	unique_ptr<QWidget>
+	mkFFTPlot();
 
 	// assume channel is valid
 	void
@@ -204,16 +224,29 @@ public:
 		return plotScales_.h;
 	}
 
+	enum PlotKind { TDOM_SCALE, FFT_SCALE };
+
 	const PlotScales *
-	getPlotScales()
+	getPlotScales(PlotKind kind)
 	{
-		return &plotScales_;
+		if ( TDOM_SCALE == kind ) {
+			return &plotScales_;
+		} else if ( FFT_SCALE == kind ) {
+			return &fftScales_;
+		}
+		return nullptr;
 	}
 
 	ScaleXfrm *
 	fftHScl()
 	{
-		return fftHScl_;
+		return fftScales_.h;;
+	}
+
+	ScaleXfrm *
+	fftVScl(int channel)
+	{
+		return fftScales_.v[ channel ];
 	}
 
 	const QColor *
@@ -299,9 +332,6 @@ public:
 	show()
 	{
 		mainWin_->show();
-		if ( secWin_ ) {
-			secWin_->show();
-		}
 	}
 
 	void
@@ -480,6 +510,9 @@ public:
 
 	double
 	getRawSample(int channel, int idx);
+
+	double
+	getRawFFTSample(int channel, int idx);
 
 	QString
 	smplToString(int channel, int idx);
@@ -1487,19 +1520,19 @@ public:
 
 
 Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
-: QObject        ( parent   ),
-  Board          ( fw, sim  ),
-  fftHScl_       ( nullptr  ),
-  fftVScl_       ( nullptr  ),
-  reader_        ( nullptr  ),
-  xRange_        ( nullptr  ),
-  fRange_        ( nullptr  ),
-  nsmpl_         ( nsamples ),
+: QObject        ( parent    ),
+  Board          ( fw, sim   ),
+  plotScales_    ( NUM_CHNLS ),
+  fftScales_     ( NUM_CHNLS ),
+  reader_        ( nullptr   ),
+  xRange_        ( nullptr   ),
+  fRange_        ( nullptr   ),
+  nsmpl_         ( nsamples  ),
   pipe_          ( ScopeReaderCmdPipe::create() ),
-  trgArm_        ( nullptr  ),
-  single_        ( false    ),
-  lsync_         ( 0        ),
-  paramUpd_      ( nullptr  )
+  trgArm_        ( nullptr   ),
+  single_        ( false     ),
+  lsync_         ( 0         ),
+  paramUpd_      ( nullptr   )
 {
 	if ( 0 == nsmpl_ ) {
 		nsmpl_ = NSMPL_DFLT;
@@ -1511,12 +1544,14 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	acq_.setNSamples( nsmpl_ );
 	acq_.flushBuf();
 
+	// Create horizontal indices for main plot
 	auto xRange = unique_ptr<double[]>( new double[ nsmpl_ ] );
 	xRange_ = xRange.get();
 	for ( int i = 0; i < nsmpl_; i++ ) {
 		xRange_[i] = (double)i;
 	}
 
+	// Create horizontal indices for fft plot
 	auto fRange = unique_ptr<double[]>( new double[ nsmpl_/2 ] );
 	fRange_ = fRange.get();
 	for ( int i = 0; i < nsmpl_/2; i++ ) {
@@ -1527,6 +1562,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto paramUpd    = unique_ptr<ParamUpdateVisitor>( new ParamUpdateVisitor( this ) );
 	paramUpd_        = paramUpd.get();
 
+	// per-channel initialization of basic resources
 	vChannelColors_.push_back( QColor( Qt::blue  ) );
 	vChannelColors_.push_back( QColor( Qt::black ) );
 
@@ -1536,79 +1572,28 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	for ( auto it = vChannelNames_.begin();  it != vChannelNames_.end(); ++it ) {
 		vOvrLEDNames_.push_back( string("OVR") + it->toStdString() );
 		vYScale_.push_back     ( getFullScaleTicks()               );
-		plotScales_.v.push_back( nullptr                           );
 	}
 
 	for ( auto it = vChannelColors_.begin(); it != vChannelColors_.end(); ++it ) {
 		vChannelStyles_.push_back( QString("color: %1").arg( it->name() ) );
 	}
 
+	// main widget
 	auto mainWid  = unique_ptr<QMainWindow>( new QMainWindow() );
 
-	auto menuBar  = unique_ptr<QMenuBar>( new QMenuBar() );
-	auto fileMen  = menuBar->addMenu( "File" );
-
-	auto act      = unique_ptr<QAction>( new QAction( "Save Waveform To" ) );
-	QObject::connect( act.get(), &QAction::triggered, this, &Scope::saveToFile );
-	fileMen->addAction( act.release() );
-
-	act           = unique_ptr<QAction>( new QAction( "Quit" ) );
-	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quitAndExit );
-	fileMen->addAction( act.release() );
-
-	mainWid->setMenuBar( menuBar.release() );
-
-	auto plot     = unique_ptr<ScopePlot>( new ScopePlot( &vChannelColors_ ) );
-	plot_         = plot.get();
-
-	auto sclDrw   = unique_ptr<ScaleXfrm>( new ScaleXfrm( true, "V", this ) );
-	sclDrw->setRawScale( vYScale_[CHA_IDX] );
-	plotScales_.v[CHA_IDX] = sclDrw.get();
-	updateVScale( CHA_IDX );
-	plot_->setAxisScaleDraw( QwtPlot::yLeft, sclDrw.get() );
-	sclDrw->setParent( plot_ );
-	sclDrw->setColor( &vChannelColors_[CHA_IDX] );
-	sclDrw.release();
-	plot_->setAxisScale( QwtPlot::yLeft, -axisVScl(CHA_IDX)->rawScale() - 1, axisVScl(CHA_IDX)->rawScale() );
-
-	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( true, "V", this ) );
-	sclDrw->setRawScale( vYScale_[CHB_IDX] );
-	plotScales_.v[CHB_IDX] = sclDrw.get();
-	updateVScale( CHB_IDX );
-	plot_->setAxisScaleDraw( QwtPlot::yRight, sclDrw.get() );
-	sclDrw->setParent( plot_ );
-	sclDrw->setColor( &vChannelColors_[CHB_IDX] );
-	sclDrw.release();
-	plot_->setAxisScale( QwtPlot::yRight, -axisVScl(CHB_IDX)->rawScale() - 1, axisVScl(CHB_IDX)->rawScale() );
-	plot_->enableAxis( QwtPlot::yRight );
-
-	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( false, "s", this ) );
-	sclDrw->setRawScale( nsmpl_ - 1 );
-	plotScales_.h = sclDrw.get();
-    updateHScale();
-
-	plot_->setAxisScaleDraw( QwtPlot::xBottom, sclDrw.get() );
-	sclDrw->setParent( plot_ );
-	sclDrw.release();
-	plot_->setAxisScale( QwtPlot::xBottom, 0,  axisHScl()->rawScale() );
-
-	// necessary after changing the axis scale
-	plot_->setZoomBase();
-
-	// connect to 'selected'; zoomed is emitted *after* the labels are painted
-	for ( auto it = plotScales_.v.begin(); it != plotScales_.v.end(); ++it ) {
-		QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), *it,  &ScaleXfrm::setRect );
-		(*it)->setRect( plot_->lzoom()->zoomRect() );
-	}
-	QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), axisHScl(),  &ScaleXfrm::setRect );
-	axisHScl()->setRect( plot_->lzoom()->zoomRect() );
-
-	// markers
-
+	// main horizontal layout holding: [plot | settings]
 	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
-	horzLay->addWidget( plot.release(), 8 );
 
+	// create main plot and add to h-layout
+	{
+	auto plot( mkMainPlot() );
+	horzLay->addWidget( plot.release(), 8 );
+	}
+
+	// form to hold all the settings
 	auto formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
+
+	// Trigger level
 	auto editWid  = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	trigLvl_      = new TrigLevel( editWid.get(), this );
 
@@ -1623,23 +1608,36 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
     MenuButton *mnu;
 
+	// Trigger source
+	{
 	trgSrc_       = new TrigSrcMenu( this );
 	trgSrc_->subscribe( paramUpd_ );
     trgSrc_->subscribe( trigLvl_  );
 	formLay->addRow( new QLabel( "Trigger Source"    ), trgSrc_ );
+	}
 
+	// Trigger edge
+	{
 	mnu           = new TrigEdgMenu( this );
 	mnu->subscribe( paramUpd_ );
 	formLay->addRow( new QLabel( "Trigger Edge"      ), mnu );
+	}
 
+	// Trigger auto-rearm
+	{
 	mnu           = new TrigAutMenu( this );
 	mnu->subscribe( paramUpd_ );
 	formLay->addRow( new QLabel( "Trigger Auto"      ), mnu );
+	}
 
+	// Trigger mode (off/cont/single)
+	{
     trgArm_ = new TrigArmMenu( this );
 	formLay->addRow( new QLabel( "Trigger Arm"       ), trgArm_ );
 	trgArm_->subscribe( paramUpd_ );
+	}
 
+	// Control of ext. GPIO
 	{
     auto extOutEnU = unique_ptr<ExtTrigOutEnTgl>( new ExtTrigOutEnTgl( this ) );
 	auto extOutEn  = extOutEnU.get();
@@ -1649,6 +1647,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	trgSrc_->subscribe( extOutEn );
 	}
 
+	// #-of pre-trigger samples (mapped to time)
 	editWid       = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	auto npts     = new NPreTriggerSamples( editWid.get(), this );
 	cmd_.npts_    = npts->getVal();
@@ -1659,6 +1658,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	formLay->addRow( trigDlyLblUP.release(), editWid.release() );
 	axisHScl()->subscribe( npts );
 
+	// Decimation
+	{
 	unsigned cic0, cic1;
 	acq_.getDecimation( &cic0, &cic1 );
 	cmd_.decm_    = cic0*cic1;
@@ -1669,9 +1670,13 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	decm->subscribe( trigDlyLbl );
 
 	formLay->addRow( new QLabel( "Decimation"        ), editWid.release() );
+	}
 
+	// ADC Clock (info only)
 	formLay->addRow( new QLabel( "ADC Clock Freq."   ), new QLabel( QString::asprintf( "%10.3e", getADCClkFreq() ) ) );
 
+	// Attenuator control
+	{
 	formLay->addRow( new QLabel( "Attenuator:" ) );
 
 	for (int i = 0; i < vChannelColors_.size(); i++ ) {
@@ -1679,9 +1684,11 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 		vOverRange_.push_back( p.second );
 		formLay->addRow( p.first.release() );
 	}
+	}
 
+
+	// FEC controls
 	bool inpHasTitle = false;
-
 	for ( int ch = 0; ch < numChannels(); ch++ ) {
 		vector< unique_ptr< QWidget > > vInp;
 		QString styleString( QString("color: ") + vChannelColors_[ch].name() );
@@ -1716,6 +1723,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 		}
 	}
 
+	// DAC controls
 	bool dacHasTitle = false;
 	for ( int ch = 0; ch < numChannels(); ch++ ) {
 		QString styleString( QString("color: ") + vChannelColors_[ch].name() );
@@ -1737,6 +1745,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 		}
 	}
 
+	// Measurements
+	{
 	formLay->addRow( new QLabel( "Measurements:" ) );
 	auto grid = std::unique_ptr<QGridLayout>( new QGridLayout() );
 
@@ -1746,74 +1756,61 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	addMeasRow( grid.get(), new QLabel( "RMS"   ), &vStdLbls_  );
 
 	formLay->addRow( grid.release() );
+	}
 
+	// connect trigger level and -delay to markers
 	trigLvl_->attach( plot_ );
 	plot_->addMarker( trigLvl_ );
 	npts->attach( plot_ );
 	plot_->addMarker( npts );
 
+	// instantiate measurement markers
 	plot_->instantiateMovableMarkers();
 
 	auto vertLay  = unique_ptr<QVBoxLayout>( new QVBoxLayout() );
 	vertLay->addLayout( formLay.release() );
 	horzLay->addLayout( vertLay.release() );
 
+	// message dialog
 	QString msgTitle( "UsbScope Message" );
 	msgDialog_ = make_shared<MessageDialog>( mainWid.get(), &msgTitle );
 
+	// main central widget
 	auto centWid  = unique_ptr<QWidget>    ( new QWidget()     );
 	centWid->setLayout( horzLay.release() );
 	mainWid->setCentralWidget( centWid.release() );
 	mainWid->installEventFilter( this );
 	mainWin_.swap( mainWid );
 
-if ( 1 ){
-	auto secWid  = unique_ptr<QMainWindow>( new QMainWindow() );
+	// dockable widget for FFT
+	auto fftDockWid  = new QDockWidget( QString("FFT"), mainWin_.get() );
 
-	secPlot_ = new ScopePlot( &vChannelColors_ );
-	printf("second plot %p\n", secPlot_);
+    fftDockWid->setAllowedAreas( Qt::BottomDockWidgetArea );
+    mainWin_->addDockWidget( Qt::BottomDockWidgetArea, fftDockWid );
 
-	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
-	horzLay->addWidget( secPlot_, 8 );
+	// create FFT plot
+	{
+	unique_ptr<QWidget> fftWid( mkFFTPlot());
 
-	secPlot_->setAxisTitle( QwtPlot::yLeft, "dBFS" );
-	double dbOff = -20.0*log10(getFullScaleTicks()*getNSamples());
-	auto xfrm = unique_ptr<ScaleXfrm>( new ScaleXfrm( true, "dB", this ) );
-	xfrm->setScale( 20.0 );
-	xfrm->setOffset( dbOff );
-	fftVScl_      = xfrm.get();
-	
-	secPlot_->setAxisScaleDraw( QwtPlot::yLeft, fftVScl_ );
-    secPlot_->setAxisScaleEngine( QwtPlot::yLeft, new ScopeSclEng( fftVScl_ ) );
+	fftDockWid->setWidget( fftWid.release() );
+	}
 
-	sclDrw        = unique_ptr<ScaleXfrm>( new ScaleXfrm( false, "Hz", this ) );
-	sclDrw->setRawScale( getNSamples() - 1 );
-	fftHScl_      = sclDrw.get();
-    updateFFTScale();
+	// menu bar and file menu
+	auto menuBar  = unique_ptr<QMenuBar>( new QMenuBar() );
+	auto fileMen  = menuBar->addMenu( "File" );
 
-	secPlot_->setAxisScaleDraw( QwtPlot::xBottom, sclDrw.get() );
-	sclDrw->setParent( secPlot_ );
-	sclDrw.release();
-	// only half of spectrum computed/shown
-	secPlot_->setAxisScale( QwtPlot::xBottom, 0,  fftHScl_->rawScale()/2.0 );
+	auto act      = unique_ptr<QAction>( new QAction( "Save Waveform To" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::saveToFile );
+	fileMen->addAction( act.release() );
 
-	secPlot_->setZoomBase();
+	fileMen->addAction( fftDockWid->toggleViewAction() );
 
-	QObject::connect( secPlot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), fftHScl_,  &ScaleXfrm::setRect );
-	fftHScl_->setRect( secPlot_->lzoom()->zoomRect() );
+	act           = unique_ptr<QAction>( new QAction( "Quit" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quitAndExit );
+	fileMen->addAction( act.release() );
 
-	auto formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
+	mainWin_->setMenuBar( menuBar.release() );
 
-	horzLay->addLayout( formLay.release() );
-
-	auto centWid  = unique_ptr<QWidget>    ( new QWidget()     );
-	centWid->setLayout( horzLay.release() );
-
-	secWid->setCentralWidget( centWid.release() );
-
-	xfrm.release();
-	secWin_.swap( secWid );
-}
 
 // no point creating these here; they need to be recreated every time anything that affects
 // the scale changes; happens in Scope::updateScale() [also the reason why they ended up
@@ -1825,6 +1822,112 @@ if ( 1 ){
     paramUpd.release();
 	xRange.release();
 	fRange.release();
+}
+
+unique_ptr<ScopePlot>
+Scope::mkMainPlot()
+{
+	auto plot     = unique_ptr<ScopePlot>( new ScopePlot( &vChannelColors_ ) );
+	plot_         = plot.get();
+
+	auto sclDrw   = new ScaleXfrm( true, "V", this, plot_ );
+	sclDrw->setRawScale( vYScale_[CHA_IDX] );
+	plotScales_.v[CHA_IDX] = sclDrw;
+	updateVScale( CHA_IDX );
+	plot_->setAxisScaleDraw( QwtPlot::yLeft, sclDrw );
+	sclDrw->setColor( &vChannelColors_[CHA_IDX] );
+	plot_->setAxisScale( QwtPlot::yLeft, -axisVScl(CHA_IDX)->rawScale() - 1, axisVScl(CHA_IDX)->rawScale() );
+
+	sclDrw        = new ScaleXfrm( true, "V", this, plot_ );
+	sclDrw->setRawScale( vYScale_[CHB_IDX] );
+	plotScales_.v[CHB_IDX] = sclDrw;
+	updateVScale( CHB_IDX );
+	plot_->setAxisScaleDraw( QwtPlot::yRight, sclDrw );
+	sclDrw->setColor( &vChannelColors_[CHB_IDX] );
+	plot_->setAxisScale( QwtPlot::yRight, -axisVScl(CHB_IDX)->rawScale() - 1, axisVScl(CHB_IDX)->rawScale() );
+	plot_->enableAxis( QwtPlot::yRight );
+
+	sclDrw        = new ScaleXfrm( false, "s", this, plot_ );
+	sclDrw->setRawScale( nsmpl_ - 1 );
+	plotScales_.h = sclDrw;
+    updateHScale();
+
+	plot_->setAxisScaleDraw( QwtPlot::xBottom, sclDrw );
+	plot_->setAxisScale( QwtPlot::xBottom, 0,  axisHScl()->rawScale() );
+
+	// necessary after changing the axis scale
+	plot_->setZoomBase();
+
+	// selected: emitted before labels are painted but not emitted when zoomed out
+	// zoomed  : emitted *after* the labels are painted but also when zoomed out
+	for ( auto it = plotScales_.v.begin(); it != plotScales_.v.end(); ++it ) {
+//		QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), *it,  &ScaleXfrm::setRect );
+		QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotZoomer::zoomed), *it,  &ScaleXfrm::setRect );
+		(*it)->setRect( plot_->lzoom()->zoomRect() );
+	}
+//	QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), axisHScl(),  &ScaleXfrm::setRect );
+	QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotZoomer::zoomed), axisHScl(),  &ScaleXfrm::setRect );
+	axisHScl()->setRect( plot_->lzoom()->zoomRect() );
+
+	// markers
+	return plot;
+}
+
+unique_ptr<QWidget>
+Scope::mkFFTPlot()
+{
+	secPlot_ = new ScopePlot( &vChannelColors_ );
+	printf("second plot %p\n", secPlot_);
+
+	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
+	horzLay->addWidget( secPlot_, 8 );
+
+	secPlot_->setAxisTitle( QwtPlot::yLeft, "dBFS" );
+	double dbOff = -20.0*log10(getFullScaleTicks()*getNSamples());
+	auto xfrm = new ScaleXfrm( true, "dB", this, secPlot_ );
+	xfrm->setScale( 20.0 );
+	xfrm->setOffset( dbOff );
+	xfrm->setUseNormalizedScale( false );
+	// both channels use the same scale!
+	fftScales_.v[CHA_IDX] = xfrm;
+	fftScales_.v[CHB_IDX] = xfrm;
+
+	secPlot_->setAxisScaleDraw( QwtPlot::yLeft, fftVScl(0) );
+	secPlot_->setAxisScaleEngine( QwtPlot::yLeft, new ScopeSclEng( fftVScl(0) ) );
+
+	xfrm          = new ScaleXfrm( false, "Hz", this, secPlot_ );
+	xfrm->setRawScale( getNSamples() - 1 );
+	fftScales_.h  = xfrm;
+	updateFFTScale();
+
+	secPlot_->setAxisScaleDraw( QwtPlot::xBottom, xfrm );
+	// only half of spectrum computed/shown
+	secPlot_->setAxisScale( QwtPlot::xBottom, 0,  fftHScl()->rawScale()/2.0 );
+
+	secPlot_->setZoomBase();
+
+	QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), fftVScl(CHA_IDX),  &ScaleXfrm::setRect );
+	fftVScl(CHA_IDX)->setRect( plot_->lzoom()->zoomRect() );
+	QObject::connect( secPlot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), fftHScl(),  &ScaleXfrm::setRect );
+	fftHScl()->setRect( secPlot_->lzoom()->zoomRect() );
+
+	auto formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
+
+	formLay->addRow( new QLabel( "Measurements:" ) );
+	auto grid = std::unique_ptr<QGridLayout>( new QGridLayout() );
+
+	addMeasPair( grid.get(), secPlot_, FFTMeasurement::create );
+
+	formLay->addRow( grid.release() );
+
+	secPlot_->instantiateMovableMarkers();
+
+
+	horzLay->addLayout( formLay.release() );
+
+	auto fftWid  = unique_ptr<QWidget>    ( new QWidget()     );
+	fftWid->setLayout( horzLay.release() );
+	return fftWid;
 }
 
 Scope::~Scope()
@@ -1953,6 +2056,7 @@ Scope::newData(BufPtr buf)
 	}
 
 	plot_->notifyMarkersValChanged();
+	secPlot_->notifyMarkersValChanged();
 
 	leds_->setVal( "Trig", 1 );
 	lsync_ = buf->getSync();
@@ -1966,6 +2070,9 @@ Scope::clf()
 {
 	if ( plot_ ) {
 		plot_->clf();
+	}
+	if ( secPlot_ ) {
+		secPlot_->clf();
 	}
 }
 
@@ -2039,9 +2146,9 @@ Scope::updateFFTScale()
 	// with noise power ~ 1tick RMS
 	double decm  = getDecimation();
 	double minDB = -10.0*log10(exp2(2.0*(getSampleSize()-1.0))*getNSamples()*decm);
-    secPlot_->setAxisScale( QwtPlot::yLeft, fftVScl_->linv(minDB), fftVScl_->linv(0.0) );
+    secPlot_->setAxisScale( QwtPlot::yLeft, fftVScl(0)->linv(minDB), fftVScl(0)->linv(0.0) );
 
-	fftHScl_->setScale( getADCClkFreq() / decm );
+	fftHScl()->setScale( getADCClkFreq() / decm );
 }
 
 // crude/linear interpolation of the precise trigger point
@@ -2126,10 +2233,10 @@ Scope::updateScale( ScaleXfrm *xfrm )
 		color = &vChannelColors_[CHB_IDX];
 	} else if ( xfrm == axisHScl() ) {
 		axId = QwtPlot::xBottom;
-	} else if ( xfrm == fftVScl_ ) {
+	} else if ( xfrm == fftVScl(CHA_IDX) ) {
 		axId = QwtPlot::yLeft;
 		plot = secPlot_;
-	} else if ( xfrm == fftHScl_ ) {
+	} else if ( xfrm == fftHScl() ) {
 		axId = QwtPlot::xBottom;
 		plot = secPlot_;
 	} else {
@@ -2165,6 +2272,21 @@ Scope::getRawSample(int channel, int idx)
 		idx = nsmpl_ - 1;
 	}
 	return curBuf_->getData(channel)[idx];
+}
+
+double
+Scope::getRawFFTSample(int channel, int idx)
+{
+	if ( channel < 0 || channel >= numChannels() || ! curBuf_  ) {
+		return NAN;
+	}
+	size_t fftSize = curBuf_->getNElms()/2;
+	if ( idx < 0 ) {
+		idx = 0;
+	} else if ( idx >= fftSize ) {
+		idx = fftSize - 1;
+	}
+	return curBuf_->getFFTModulus(channel)[idx];
 }
 
 double
@@ -2267,8 +2389,8 @@ Scope::handleKeyPress( int key )
 }
 
 SampleMeasurement::SampleMeasurement( Scope *scp )
-: Measurement( scp->getPlotScales() ),
-  scp_       ( scp                  )
+: Measurement( scp->getPlotScales( Scope::PlotKind::TDOM_SCALE ) ),
+  scp_       ( scp                                               )
 {
 }
 
@@ -2277,6 +2399,19 @@ SampleMeasurement::getRawData(unsigned ch, int idx)
 {
 	return scp_->getRawSample( ch, idx );	
 }
+
+FFTMeasurement::FFTMeasurement( Scope *scp )
+: Measurement( scp->getPlotScales( Scope::PlotKind::FFT_SCALE )  ),
+  scp_       ( scp                                               )
+{
+}
+
+double
+FFTMeasurement::getRawData(unsigned ch, int idx)
+{
+	return scp_->getRawFFTSample( ch, idx );	
+}
+
 
 static void
 usage(const char *nm)
