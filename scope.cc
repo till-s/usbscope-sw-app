@@ -1906,9 +1906,9 @@ Scope::mkFFTPlot()
 
 	secPlot_->setZoomBase();
 
-	QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), fftVScl(CHA_IDX),  &ScaleXfrm::setRect );
+	QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotZoomer::zoomed), fftVScl(CHA_IDX),  &ScaleXfrm::setRect );
 	fftVScl(CHA_IDX)->setRect( plot_->lzoom()->zoomRect() );
-	QObject::connect( secPlot_->lzoom(), qOverload<const QRectF&>(&QwtPlotPicker::selected), fftHScl(),  &ScaleXfrm::setRect );
+	QObject::connect( secPlot_->lzoom(), qOverload<const QRectF&>(&QwtPlotZoomer::zoomed), fftHScl(),  &ScaleXfrm::setRect );
 	fftHScl()->setRect( secPlot_->lzoom()->zoomRect() );
 
 	auto formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
