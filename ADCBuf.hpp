@@ -276,6 +276,8 @@ public:
 		for ( size_t i = 0; i < nelms_/2 + 1; ++i ) {
 			dp[i] = log10(hypot( sp[i][0], sp[i][1] ));
 		}
+		// one-sided spectrum;
+		dp[0] -= log10(2.0);
 	}
 
 	void

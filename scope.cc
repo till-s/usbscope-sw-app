@@ -1883,7 +1883,10 @@ Scope::mkFFTPlot()
 	horzLay->addWidget( secPlot_, 8 );
 
 	secPlot_->setAxisTitle( QwtPlot::yLeft, "dBFS" );
-	double dbOff = -20.0*log10(getFullScaleTicks()*getNSamples());
+	// one-sided spectrum; multiply half of two-sided spectrum
+	// by two (= divide scale by 2).
+	// The value at f=0 has been halved in computeAbsFFT().
+	double dbOff = -20.0*log10(0.5*getFullScaleTicks()*getNSamples());
 	auto xfrm = new ScaleXfrm( true, "dB", this, secPlot_ );
 	xfrm->setScale( 20.0 );
 	xfrm->setOffset( dbOff );
