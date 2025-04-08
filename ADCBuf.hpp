@@ -39,6 +39,8 @@ private:
 	double                 std_[NCH];   // measurement (std-dev)
 	bool                   mVld_[NCH];  // measurement valid flag
 	time_t                 time_;
+	uint8_t               *rawData_;
+	size_t                 rawSize_;
 	struct {
 	T                      *tdom;
 	fftw_complex           *fft;
@@ -66,14 +68,14 @@ public:
 		friend class ADCBufPool<T, NCH>;
 	};
 
-	ADCBuf(const Key &k, unsigned stride)
+	ADCBuf(const Key &k, unsigned stride, size_t rawElSz)
 	: stride_    ( stride )
 	{
 		for (int i = 0; i < NCH; i++ ) {
 			mVld_ [i] = false;
 		}
 		if ( ! data_[0].tdom ) {
-			allocData();
+			allocData(rawElSz);
 		}
 	}
 
@@ -249,6 +251,18 @@ public:
 		throw std::invalid_argument( __func__ );
 	}
 
+	uint8_t *
+	getRawData()
+	{
+		return rawData_;
+	}
+
+	size_t
+	getRawSize()
+	{
+		return rawSize_;
+	}
+
 	fftw_complex *
 	getFFT(unsigned ch)
 	{
@@ -281,7 +295,7 @@ public:
 	}
 
 	void
-	allocData()
+	allocData(size_t rawElSz)
 	{
 		for ( int i = 0; i < NCH; ++i ) {
 			data_[i].tdom = fftw_alloc_real( stride_ );
@@ -290,6 +304,11 @@ public:
 			if ( ! data_[i].tdom || ! data_[i].fft || ! data_[i].fftM ) {
 				throw std::runtime_error("no memory");
 			}
+		}
+		rawSize_ = rawElSz*NCH*stride_;
+		rawData_ = static_cast<uint8_t*>( ::malloc( rawSize_ ) );
+		if ( ! rawData_ ) {
+			throw std::runtime_error("no memory");
 		}
 	}
 
@@ -304,6 +323,7 @@ public:
 			delete [] data_[i].fftM;
 			data_[i].fftM = nullptr;
 		}
+		::free( rawData_ );
 	}
 };
 
@@ -311,14 +331,16 @@ template <typename T, size_t NCH = 2>
 class ADCBufPool : public BufPool< ADCBuf<T,NCH> > {
 private:
 	unsigned                      maxNElms_;
+	size_t                        rawElSz_;
 
 public:
 
 	const static unsigned         NumChannels = NCH;
 
-	ADCBufPool(unsigned maxNElms)
+	ADCBufPool(unsigned maxNElms, size_t rawElSz_)
 	: BufPool< ADCBuf<T,NCH> >( 0 ),
-	  maxNElms_( maxNElms )
+	  maxNElms_( maxNElms ),
+	  rawElSz_ ( rawElSz_ )
 	{
 	}
 
@@ -335,7 +357,7 @@ public:
 	get()
 	{
 		typename ADCBuf<T,NCH>::Key key;
-		return BufPool< ADCBuf<T, NCH> >::get( key, maxNElms_ );
+		return BufPool< ADCBuf<T, NCH> >::get( key, maxNElms_, rawElSz_ );
 	}
 
 	virtual ~ADCBufPool()

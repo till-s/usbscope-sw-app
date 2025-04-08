@@ -37,6 +37,8 @@ endif()
 include_directories(./ fwcommCPP usbadc-support/sw /usr/include/qwt)
 
 add_executable(scope ${SRCS})
+add_executable(h5t h5t.cc)
 set_target_properties(scope PROPERTIES AUTOMOC ON)
 
 target_link_libraries(scope PRIVATE ${LIBS})
+target_link_libraries(h5t PRIVATE ${LIBS})

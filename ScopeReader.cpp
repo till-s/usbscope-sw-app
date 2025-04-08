@@ -20,14 +20,11 @@ ScopeReader::ScopeReader(
   notified_     ( notified ),
   bytesPerSmpl_ ( acq_.getBufSampleSize() * BufPoolType::NumChannels )
 {
-	std::unique_ptr<ReadBufIF> rbuf;
-
 	if ( 2 == acq_.getBufSampleSize() ) {
-		rbuf = std::unique_ptr<ReadBufIF>( new ReadBuf<int16_t>( &acq_ ) );
+		readBuf_  = new ReadBuf<int16_t>( &acq_ );
 	} else {
-		rbuf = std::unique_ptr<ReadBufIF>( new ReadBuf<int8_t> ( &acq_ ) );
+		readBuf_  = new ReadBuf<int8_t>( &acq_ );
 	}
-	readBuf_   = rbuf.release();
 
 	BufPtr buf = bufPool_->get();
 
@@ -81,7 +78,7 @@ ScopeReader::run()
 
 		if ( 0 == st ) {
 			// timeout due to polling mode;
-			got = readBuf_->read( & hdr );
+			got = readBuf_->read( & hdr, buf );
 		} else {
 			got = 0;
 			if ( pfd[0].revents ) {
@@ -96,7 +93,7 @@ ScopeReader::run()
 				if ( (pfd[1].revents & ~POLLIN) ) {
 					throw std::runtime_error( string(__func__) + " poll error on IRQ read" );
 				}
-				got = readBuf_->read( &hdr );
+				got = readBuf_->read( &hdr, buf );
 			}
 		}
 
@@ -105,7 +102,7 @@ ScopeReader::run()
 			// initHdr must be called first (sets nelms_)
 			buf->initHdr( cmd, hdr, nelms );
 			for ( int ch = 0; ch < bufPool_->NumChannels; ch++ ) {
-				readBuf_->copyCh( buf, ch, nelms );
+				readBuf_->copyCh( buf, ch );
 				fftw_execute_dft_r2c( fftwPlan_, buf->getData( ch ), buf->getFFT( ch ) );
 				buf->computeAbsFFT( ch );
 				buf->measure( ch );

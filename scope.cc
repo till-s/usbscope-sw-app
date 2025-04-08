@@ -457,21 +457,23 @@ public:
 			saveToDir_ = fileName.substr( 0, slash );
 			try {
 				typedef H5Smpl::Dimension Dim;
-				std::vector<Dim> dims;
-				dims.push_back( Dim().max( buf->getNumChannels() ) );
+				std::vector<Dim>          dims;
+				size_t                    nch = buf->getNumChannels();
 				dims.push_back( Dim().max( buf->getMaxNElms() ).cnt( buf->getNElms() ) );
-				unsigned precision = 16;
-#if 0
-				// could not get type-conversion (double->int16) AND
-				// nbit compression to work in one go.
+				dims.push_back( Dim().max( nch ).cnt( nch ) );
+				unsigned precision;
+
 				try {
 					precision = getSampleSize();
 				} catch ( std::runtime_error &e ) {
 					precision = 16;
 				}
-#endif
-				unsigned offset = 16 - precision;
-				H5Smpl h5f( fileName, INT16_T, DOUBLE_T, offset, precision, dims, buf->getData(0) );
+				unsigned ceilPrecision = ((precision + 7)>>3)<<3;
+				unsigned offset = ceilPrecision - precision;
+
+				H5Smpl h5f( fileName, INT16_T, offset, precision, dims );
+
+				h5f.addHSlab( nullptr, nullptr, buf->getRawData() );
 
 				std::vector<double> scl( buf->getScale() );
 				h5f.addAttribute( H5K_SCALE_VOLT,         scl );
@@ -2085,7 +2087,8 @@ Scope::startReader(unsigned poolDepth)
 	if ( reader_ ) {
 		throw std::runtime_error( string(__func__) + " reader already started" );
 	}
-	BufPoolPtr bufPool = make_shared<BufPoolPtr::element_type>( nsmpl_ );
+	size_t rawElSz = acq()->getBufSampleSize();
+	BufPoolPtr bufPool = make_shared<BufPoolPtr::element_type>( nsmpl_, rawElSz );
 	bufPool->add( poolDepth );
 	reader_ = new ScopeReader( unlockedPtr(), bufPool, pipe_, this );
 	reader_->start();
