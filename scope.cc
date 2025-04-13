@@ -2100,10 +2100,16 @@ Scope::stopReader()
 	cmd_.stop_ = true;
 	pipe_->sendCmd( &cmd_ );
 	reader_->wait();
+	// process events: make sure all data that may have been
+	// posted by the reader is processed before we take
+	// down the buffer pool.
+	QEventLoop loop;
+	loop.processEvents(QEventLoop::ExcludeUserInputEvents);
 	// reader owns the buffer pool; make sure
 	// we return everything before deleting the reader
 	curBuf_.reset();
 	delete reader_;
+	reader_ = nullptr;
 	printf("reader stopped\n");
 }
 
