@@ -4,11 +4,10 @@
 #include <time.h>
 #include <memory>
 #include <vector>
-#include <BufPool.hpp>
+#include <IntrusiveShpFreeList.hpp>
+#include <IntrusiveShp.hpp>
 #include <AcqCtrl.hpp>
 #include <fftw3.h>
-
-using std::shared_ptr;
 
 template <size_t NCH>
 struct AcqSettings {
@@ -29,8 +28,8 @@ struct AcqSettings {
 template <typename T, size_t NCH> class ADCBufPool;
 
 template <typename T, size_t NCH = 2>
-class ADCBuf : public BufNode< ADCBuf<T> >, public AcqSettings<NCH> {
-	typedef shared_ptr<ADCBuf> ADCBufPtr;
+class ADCBuf : public IntrusiveSmart::FreeListNode, public AcqSettings<NCH> {
+	typedef IntrusiveSmart::Shp<ADCBuf>  ADCBufPtr;
 private:
 	unsigned               stride_;     // elements in buffer: stride_*NCH
 	unsigned               nelms_;      // # valid elements (per channel)
@@ -56,31 +55,29 @@ public:
 
 	typedef T                  ElementType;
 
-	class Key {
-	private:
-		Key()                  = default;
-
-		Key(const Key &)       = delete;
-
-		Key &
-		operator=(const Key &) = delete;
-
-		friend class ADCBufPool<T, NCH>;
-	};
-
-	ADCBuf(const Key &k, unsigned stride, size_t rawElSz)
+	ADCBuf(unsigned stride, size_t rawElSz)
 	: stride_    ( stride )
+	{
+		invalidate();
+		allocData(rawElSz);
+	}
+
+	void
+	invalidate()
 	{
 		for (int i = 0; i < NCH; i++ ) {
 			mVld_ [i] = false;
 		}
-		if ( ! data_[0].tdom ) {
-			allocData(rawElSz);
-		}
+	}
+
+	virtual void unmanage(const Key &k) override {
+		IntrusiveSmart::FreeListNode::unmanage( k );
+		invalidate();
 	}
 
 	~ADCBuf()
 	{
+		freeData();
 	}
 
 	void
@@ -324,11 +321,12 @@ public:
 			data_[i].fftM = nullptr;
 		}
 		::free( rawData_ );
+		rawData_ = nullptr;
 	}
 };
 
 template <typename T, size_t NCH = 2>
-class ADCBufPool : public BufPool< ADCBuf<T,NCH> > {
+class ADCBufPool : public IntrusiveSmart::FreeListBase {
 private:
 	unsigned                      maxNElms_;
 	size_t                        rawElSz_;
@@ -338,14 +336,13 @@ public:
 	const static unsigned         NumChannels = NCH;
 
 	ADCBufPool(unsigned maxNElms, size_t rawElSz_)
-	: BufPool< ADCBuf<T,NCH> >( 0 ),
-	  maxNElms_( maxNElms ),
+	: maxNElms_( maxNElms ),
 	  rawElSz_ ( rawElSz_ )
 	{
 	}
 
-	typedef ADCBuf<T,NCH>                 ADCBufType;
-	typedef std::shared_ptr< ADCBufType > ADCBufPtr;
+	typedef ADCBuf<T,NCH>                   ADCBufType;
+	typedef IntrusiveSmart::Shp<ADCBufType> ADCBufPtr;
 
 	unsigned
 	getMaxNElms()
@@ -353,26 +350,29 @@ public:
 		return maxNElms_;
 	}
 
+	size_t
+	getRawElSz()
+	{
+		return rawElSz_;
+	}
+
+	void
+	add(size_t poolDepth)
+	{
+		while ( poolDepth-- ) {
+			put( new ADCBufType( getMaxNElms(), getRawElSz() ) );
+		}
+	}
+
 	ADCBufPtr
 	get()
 	{
-		typename ADCBuf<T,NCH>::Key key;
-		return BufPool< ADCBuf<T, NCH> >::get( key, maxNElms_, rawElSz_ );
-	}
-
-	virtual ~ADCBufPool()
-	{
-		// hack to destroy all
-		ADCBufPtr anchor;
-		ADCBufPtr p;
-		try {
-			while ( p = get() ) {
-				p->freeData();
-				p->next_ = anchor;
-				anchor = p;
-			}
-		} catch (PoolEmpty) {
+		auto rv = FreeListBase::get<typename ADCBufPtr::element_type>();
+		if ( ! rv ) {
+			// out of buffers
+			throw std::bad_alloc();
 		}
+		return rv;
 	}
 };
 

@@ -27,6 +27,7 @@ set(SRCS
 	"ParamValidator.cpp"
 	"MeasMarker.cpp"
 	"Measurement.cpp"
+	"IntrusiveSharedPointer/IntrusiveShpFreeList.cpp"
 )
 
 set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)
@@ -34,7 +35,7 @@ if (HDF5_FOUND)
 	list(APPEND LIBS ${HDF5_LIBRARIES})
 endif()
 
-include_directories(./ fwcommCPP usbadc-support/sw /usr/include/qwt)
+include_directories(./ IntrusiveSharedPointer fwcommCPP usbadc-support/sw /usr/include/qwt)
 
 add_executable(scope ${SRCS})
 set_target_properties(scope PROPERTIES AUTOMOC ON)
