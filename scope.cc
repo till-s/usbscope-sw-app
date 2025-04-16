@@ -2443,7 +2443,7 @@ usage(const char *nm)
 	printf("  -r                  : Refrain from resetting the device to a safe mode\n");
 	printf("                        upon quitting the application. By default a safe\n");
 	printf("                        state (maximize all attenuators, remove termination\n");
-	printf("                        etc. is programmed).\n");
+	printf("                        etc.) is programmed.\n");
 }
 
 int
