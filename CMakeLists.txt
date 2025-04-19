@@ -6,7 +6,7 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets)
 
 find_package(HDF5 COMPONENTS C)
 
-add_subdirectory(usbadc-support/sw fwcomm)
+add_subdirectory(usbadc-support/sw)
 add_subdirectory(fwcommCPP)
 
 find_library(QWT NAMES qwt qwt6 qwt-qt5 fftw3)

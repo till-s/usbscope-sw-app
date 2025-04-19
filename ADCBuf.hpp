@@ -288,7 +288,7 @@ public:
 			dp[i] = log10(hypot( sp[i][0], sp[i][1] ));
 		}
 		// one-sided spectrum;
-		dp[0] -= log10(2.0);
+		dp[0] -= log10(2.0)/2.0;
 	}
 
 	void

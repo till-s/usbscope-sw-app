@@ -1886,8 +1886,9 @@ Scope::mkFFTPlot()
 
 	secPlot_->setAxisTitle( QwtPlot::yLeft, "dBFS" );
 	// one-sided spectrum; multiply half of two-sided spectrum
-	// by two (= divide scale by 2).
-	// The value at f=0 has been halved in computeAbsFFT().
+	// by sqrt(2) (so that Energy remains the same).
+    // (= divide scale by sqrt(2)).
+	// The value at f=0 has been adjusted in computeAbsFFT().
 	double dbOff = -20.0*log10(0.5*getFullScaleTicks()*getNSamples());
 	auto xfrm = new ScaleXfrm( true, "dB", this, secPlot_ );
 	xfrm->setScale( 20.0 );
