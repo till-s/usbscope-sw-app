@@ -2389,12 +2389,16 @@ Scope::addMeasPair( QGridLayout *grid, ScopePlot *plot, Measurement* (*measFacto
 
 
 
+// Hmm - this requires the zoom area the callback was registered for to have the keyboard focus
 void
 Scope::handleKeyPress( int key )
 {
 	switch ( key ) {
 		case Qt::Key_C:
 			clf();
+			break;
+		case Qt::Key_S:
+			trgArm_->update( TrigArmMenu::SINGLE );
 			break;
 		default:
 			break;
