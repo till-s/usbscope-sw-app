@@ -146,7 +146,6 @@ private:
 	bool                                  safeQuit_ {true};
 	string                                saveToDir_ {"."};
 	ScopeParamsPool                       paramsPool_;
-	ScopeParamsPtr                        currentParams_;
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
@@ -189,6 +188,9 @@ public:
 
 	void
 	updateFFTScale();
+
+	void
+	updateFFTScale(ScopeParamsCPtr scopeParams);
 
 	unsigned
 	numChannels() const
@@ -289,10 +291,10 @@ public:
 		return trgSrc_;
 	}
 
-	ScopeParamsPtr
+	ScopeParamsCPtr
 	currentParams()
 	{
-		return currentParams_;
+		return cmd_.scopeParams_;
 	}
 
 	PGAPtr
@@ -367,9 +369,6 @@ public:
 	}
 
 	void
-	setDecimation(unsigned d);
-
-	void
 	postTrgMode(const QString &mode)
 	{
 		if ( mode == "Single" ) {
@@ -379,19 +378,17 @@ public:
 	}
 
 	void
+	postSync(ScopeParamsPtr desired)
+	{
+		cmd_.scopeParams_ = desired;
+		postSync();
+	}
+
+	void
 	postSync()
 	{
 		cmd_.sync_++;
 		pipe_->sendCmd( &cmd_ );
-	}
-
-	void
-	updateNPreTriggerSamples(unsigned npts);
-
-	void
-	updateTriggerSrc(TriggerSource src, int rising)
-	{
-		postSync();
 	}
 
 	void
@@ -450,15 +447,8 @@ public:
 				H5Smpl h5f( fileName, INT16_T, offset, precision, dims );
 
 				h5f.addHSlab( nullptr, nullptr, buf->getRawData() );
-
-				std::vector<double> scl( buf->getScale() );
-				h5f.addAttribute( H5K_SCALE_VOLT,         scl );
-				h5f.addAttribute( H5K_DECIMATION,         buf->getDecimation() );
-				h5f.addAttribute( H5K_CLOCK_F_HZ,         getADCClkFreq() );
-				h5f.addAttribute( H5K_NPTS,               buf->getNPreTriggerSamples() );
 				h5f.addHdrInfo( buf->getHdr(), buf->getNumChannels() );
-				h5f.addDate( buf->getTime() );
-				h5f.addTriggerSource( buf->getTriggerSource(), buf->getTriggerEdgeRising() );
+				h5f.addScopeParams( buf->scopeParams_.get() );
 			} catch ( std::runtime_error &e ) {
 				message( e.what() );
 				// remove file if something failed
@@ -497,6 +487,9 @@ public:
 
 	virtual void
 	handleKeyPress( int key ) override;
+
+	ScopeParamsPtr
+	cloneScopeParams();
 
 protected:
 	// override from QObject
@@ -811,7 +804,8 @@ public:
 	}
 
 	virtual void
-	update(State newState) {
+	update(State newState)
+	{
 		if ( newState != state_ ) {
 			state_ = newState;
 			switch ( state_ ) {
@@ -1097,7 +1091,7 @@ public:
 	virtual int
 	getVal() const override
 	{
-		return scp_->getDecimation();
+		return scp_->currentParams()->getDecimation();
 	}
 
 	virtual void accept(ValChangedVisitor *v) override
@@ -1402,33 +1396,26 @@ public:
 
 	virtual void visit( TrigSrcMenu *mnu ) override
 	{
-		TriggerSource src;
-		bool          rising;
-		scp_->acq()->getTriggerSrc( &src, &rising );
-
-		src = mnu->getSrc();
-
-		scp_->acq()->setTriggerSrc( src, rising );
-		scp_->updateTriggerSrc( src, rising );
+		auto p = scp_->cloneScopeParams();
+		p->acqParams.src = mnu->getSrc();
+		update( p );
 	}
 
 	virtual void visit( TrigEdgMenu *mnu ) override
 	{
-		TriggerSource src;
-		bool          rising;
-		scp_->acq()->getTriggerSrc( &src, &rising );
-
+		auto  p          = scp_->cloneScopeParams();
 		const QString &s = mnu->text();
-		rising = (s == "Rising");
-		scp_->acq()->setTriggerSrc( src, rising );
-		scp_->updateTriggerSrc( src, rising );
+		p->acqParams.rising = (s == "Rising");
+		update( p );
 	}
 
 	virtual void visit( TrigAutMenu *mnu ) override
 	{
+		auto  p          = scp_->cloneScopeParams();
 		const QString &s = mnu->text();
-		int ms = (s == "On") ? 100 : -1;
-		scp_->acq()->setAutoTimeoutMS( ms );
+		int            ms = (s == "On") ? 100 : -1;
+		p->acqParams.autoTimeoutMS = ms;
+		update( p );
 	}
 
 	virtual void visit( TrigArmMenu *mnu ) override
@@ -1439,35 +1426,48 @@ public:
 
 	virtual void visit(AttenuatorSlider *sl) override
 	{
-		scp_->pga()->setDBAtt( sl->channel(), sl->value() );
-		scp_->updateVScale( sl->channel() );
+		auto  p          = scp_->cloneScopeParams();
+		p->afeParams[sl->channel()].pgaAttDb = sl->value();
+		update( p );
 	}
 
 	virtual void visit(FECAttenuatorTgl *tgl) override
 	{
-		scp_->fec()->setAttenuator( tgl->channel(), tgl->isChecked() );
-		scp_->updateVScale( tgl->channel() );
+		auto  p          = scp_->cloneScopeParams();
+		double min, max;
+
+		scp_->fec()->getDBRange( &min, &max );
+
+		p->afeParams[tgl->channel()].fecAttDb = (tgl->isChecked() ? max : min );
+		update( p );
 	}
 
 	virtual void visit(FECTerminationTgl *tgl) override
 	{
-		scp_->fec()->setTermination( tgl->channel(), tgl->isChecked() );
-		scp_->leds()->setVal( tgl->ledName(), tgl->isChecked() );
+		auto  p          = scp_->cloneScopeParams();
+		p->afeParams[tgl->channel()].fecTerminationOhm = (tgl->isChecked() ? 50.0 : 1.0E6 );
+		update( p );
 	}
 
 	virtual void visit(FECACCouplingTgl *tgl) override
 	{
-		scp_->fec()->setACMode( tgl->channel(), tgl->isChecked() );
+		auto  p          = scp_->cloneScopeParams();
+		p->afeParams[tgl->channel()].fecCouplingAC = (tgl->isChecked() ? 1 : 0);
+		update( p );
 	}
 
 	virtual void visit(TrigLevel *lvl) override
 	{
-		scp_->acq()->setTriggerLevelPercent( lvl->levelPercent() );
+		auto  p            = scp_->cloneScopeParams();
+		p->acqParams.level = acq_percent_to_level( lvl->levelPercent() );
+		update( p );
 	}
 
 	virtual void visit(CalDAC *dac) override
 	{
-		scp_->slowDAC()->setVolts( dac->getChannel(), dac->getDbl() );
+		auto  p          = scp_->cloneScopeParams();
+		p->afeParams[dac->getChannel()].dacVolts = dac->getDbl();
+		update( p );
 	}
 
 	virtual void visit(ExtTrigOutEnTgl *tgl) override
@@ -1478,21 +1478,29 @@ public:
 				scp_->message("In EXT Trigger Mode GPIO cannot be set to OUTPUT");
 			}
 		} else {
-			scp_->acq()->setExtTrigOutEnable( tgl->isChecked() );
-			scp_->currentParams()->acqParams.trigOutEn = tgl->isChecked();
+			auto  p          = scp_->cloneScopeParams();
+			p->acqParams.trigOutEn = ( tgl->isChecked() ? 1 : 0 );
+			update( p );
 		}
 	}
 
 	virtual void visit(NPreTriggerSamples *npts) override
 	{
-		int val = npts->getNPTS();
-		scp_->acq()->setNPreTriggerSamples( val );
-		scp_->updateNPreTriggerSamples( val );
+		auto  p           = scp_->cloneScopeParams();
+		p->acqParams.npts = npts->getNPTS();
+		update( p );
 	}
 
 	virtual void visit(Decimation *decm) override
 	{
-		scp_->setDecimation( decm->getInt() );
+		auto  p           = scp_->cloneScopeParams();
+
+		unsigned d0, d1;
+
+		scp_->acq()->computeCICDecimation( decm->getInt(), &d0, &d1 );
+		p->acqParams.cic0Decimation = d0;
+		p->acqParams.cic1Decimation = d1;
+		update( p );
 	}
 
 	virtual void update(ScopeParamsPtr desired) {
@@ -1540,7 +1548,7 @@ public:
 		}
 
 		if (    ( desired->acqParams.cic0Decimation != cur->acqParams.cic0Decimation )
-		     || ( desired->acqParams.cic0Decimation != cur->acqParams.cic0Decimation ) ) {
+		     || ( desired->acqParams.cic1Decimation != cur->acqParams.cic1Decimation ) ) {
 			scp_->acq()->setDecimation( desired->acqParams.cic0Decimation, desired->acqParams.cic1Decimation );
 			hScaleUpdate = 2;
 			changed = true;
@@ -1549,7 +1557,7 @@ public:
 		if ( hScaleUpdate ) {
 			scp_->updateHScale( desired );
 			if ( hScaleUpdate > 1 ) {
-				scp_->updateFFTScale();
+				scp_->updateFFTScale( desired );
 			}
 		}
 
@@ -1567,7 +1575,7 @@ public:
 				vScaleChanged = true;
 			}
 			if ( (dval = desired->afeParams[ch].fecAttDb) != cur->afeParams[ch].fecAttDb ) {
-				scp_->fec()->setAttenuator( ch, dval > 0.0 );
+				scp_->fec()->setAttenuator( ch, dval );
 				changed       = true;
 				vScaleChanged = true;
 			}
@@ -1612,6 +1620,9 @@ public:
 				}
 			}
 		}
+		if ( changed ) {
+			scp_->postSync( desired );
+		}
 	}
 
 };
@@ -1644,9 +1655,12 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	acq_.flushBuf();
 
 	paramsPool_.add( 10 );
-	currentParams_ = paramsPool_.get();
-	if ( scope_get_params( (*this)->scope(), currentParams_.get() ) ) {
-		throw std::runtime_error("Scope::Scope - scope_get_params() failed");
+	{
+		auto p = paramsPool_.get();
+		if ( scope_get_params( (*this)->scope(), p.get() ) ) {
+			throw std::runtime_error("Scope::Scope - scope_get_params() failed");
+		}
+		cmd_.scopeParams_ = p;
 	}
 
 	// Create horizontal indices for main plot
@@ -2059,6 +2073,12 @@ Scope::event(QEvent *event)
 
 }
 
+ScopeParamsPtr
+Scope::cloneScopeParams()
+{
+	return paramsPool_.get( currentParams() );
+}
+
 void
 Scope::bringIntoSafeState()
 {
@@ -2068,7 +2088,7 @@ Scope::bringIntoSafeState()
 	if ( fec() ) {
 		fec()->getDBRange( nullptr, &maxFecAtt );
 	}
-	auto parms = paramsPool_.get( currentParams() );
+	auto parms = cloneScopeParams();
 	for ( auto ch = 0; ch < getNumChannels(); ++ch ) {
 		if ( ! isnan( parms->afeParams[ch].fecTerminationOhm ) ) {
 			parms->afeParams[ch].fecTerminationOhm = 1.0E6;
@@ -2092,7 +2112,7 @@ Scope::bringIntoSafeState()
 
 void
 Scope::setVoltScale(int channel, double voltScale) {
-	auto newParams = paramsPool_.get( currentParams() );
+	auto newParams = cloneScopeParams();
 	if ( channel >= newParams->numChannels ) {
 		throw std::invalid_argument("invalid channel index");
 	}
@@ -2253,22 +2273,6 @@ Scope::stopReader()
 	printf("reader stopped\n");
 }
 
-void
-Scope::updateNPreTriggerSamples(unsigned npts)
-{
-	updateHScale();
-	postSync();
-}
-
-void
-Scope::setDecimation(unsigned d)
-{
-	acq_.setDecimation( d );
-	updateHScale();
-	updateFFTScale();
-	postSync();
-}
-
 QwtPlotZoomer *
 Scope::getZoom()
 {
@@ -2296,8 +2300,14 @@ Scope::updateHScale(ScopeParamsCPtr scopeParams)
 void
 Scope::updateFFTScale()
 {
+	updateFFTScale( currentParams() );
+}
+
+void
+Scope::updateFFTScale(ScopeParamsCPtr scopeParams)
+{
 	// with noise power ~ 1tick RMS
-	double decm  = getDecimation();
+	double decm  = scopeParams->getDecimation();
 	double minDB = -10.0*log10(exp2(2.0*(getSampleSize()-1.0))*getNSamples()*decm);
 	secPlot_->setAxisScale( QwtPlot::yLeft, fftVScl(0)->linv(minDB), fftVScl(0)->linv(0.0) );
 

@@ -33,12 +33,22 @@ public:
 	void
 	sendCmd(const ScopeReaderCmd *cmd)
 	{
+		// terrible hack to increment the reference
+		// count of the shared-pointer embedded in cmd
+		char mem[sizeof(cmd->scopeParams_)];
+		// placement new takes a reference but the
+		// so created Shp is never destroyed
+		// (but 'serialized' into the pipe)
+		new(static_cast<void*>(mem)) ScopeParamsCPtr(cmd->scopeParams_);
 		write( cmd, sizeof(*cmd) );
 	}
 
 	void
 	waitCmd(ScopeReaderCmd *cmd)
 	{
+		// release SHP since it will be
+		// 'hard-overwritten'
+		cmd->scopeParams_.reset();
 		read( cmd, sizeof(*cmd) );
 	}
 

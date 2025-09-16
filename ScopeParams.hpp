@@ -7,6 +7,8 @@
 namespace impl {
 
 class ScopeParams : public IntrusiveSmart::FreeListNode, public ::ScopeParams {
+public:
+	unsigned getDecimation() const;
 };
 
 };
@@ -23,6 +25,6 @@ public:
 
 	// if 'other' is given then make a clone
 	ScopeParamsPtr
-	get(ScopeParamsPtr other=ScopeParamsPtr());
+	get(ScopeParamsCPtr other=ScopeParamsCPtr());
 	
 };

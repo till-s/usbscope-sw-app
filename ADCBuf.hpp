@@ -63,6 +63,7 @@ public:
 		for (int i = 0; i < NCH; i++ ) {
 			mVld_ [i] = false;
 		}
+		scopeParams_.reset();
 	}
 
 	virtual void unmanage(const Key &k) override {

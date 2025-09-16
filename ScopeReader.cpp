@@ -64,6 +64,9 @@ ScopeReader::run()
 	unsigned       got   = 0;
 	uint16_t       hdr;
 
+	// must wait until we have parameters
+	pipe_->waitCmd( &cmd );
+
 	while ( ! cmd.stop_ ) {
 
 		if ( ! buf ) {

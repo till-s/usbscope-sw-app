@@ -7,6 +7,10 @@
 #include <IntrusiveShp.hpp>
 #include <BoardRef.hpp>
 
+unsigned impl::ScopeParams::getDecimation() const {
+	return acqParams.cic0Decimation * acqParams.cic1Decimation;
+}
+
 
 ScopeParamsPool::ScopeParamsPool(BoardInterface *brd)
 : BoardRef ( brd      )
@@ -37,7 +41,7 @@ ScopeParamsPool::add(unsigned poolDepth)
 }
 
 ScopeParamsPtr
-ScopeParamsPool::get(ScopeParamsPtr other)
+ScopeParamsPool::get(ScopeParamsCPtr other)
 {
 	auto rv = FreeListBase::get<typename ScopeParamsPtr::element_type>();
 	if ( ! rv ) {
