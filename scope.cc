@@ -51,6 +51,7 @@
 #include <ParamValidator.hpp>
 #include <MeasMarker.hpp>
 #include <Measurement.hpp>
+#include <ScopeParams.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
@@ -141,9 +142,11 @@ private:
 	bool                                  single_;
 	unsigned                              lsync_;
 	TrigLevel                            *trigLvl_;
-    ParamUpdateVisitor                   *paramUpd_;
+	ParamUpdateVisitor                   *paramUpd_;
 	bool                                  safeQuit_ {true};
 	string                                saveToDir_ {"."};
+	ScopeParamsPool                       paramsPool_;
+	ScopeParamsPtr                        currentParams_;
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
@@ -168,6 +171,9 @@ public:
 	// assume channel is valid
 	void
 	updateVScale(int channel);
+
+	void
+	updateVScale(int channel, double att);
 
 	double
 	getTriggerOffset(BufPtr);
@@ -286,6 +292,12 @@ public:
 		return trgSrc_;
 	}
 
+	ScopeParamsPtr
+	currentParams()
+	{
+		return currentParams_;
+	}
+
 	PGAPtr
 	pga()
 	{
@@ -380,46 +392,21 @@ public:
 	updateNPreTriggerSamples(unsigned npts);
 
 	void
-	updateTriggerSrc(TriggerSource src)
+	updateTriggerSrc(TriggerSource src, int rising)
 	{
 		cmd_.tsrc_ = src;
-		postSync();
-	}
-
-	void
-	updateTriggerEdge(int rising)
-	{
 		cmd_.rise_ = rising;
+		currentParams()->acqParams.src    = src;
+		currentParams()->acqParams.rising = rising;
+		if ( EXT != src ) {
+			currentParams()->acqParams.trigOutEn = 0;
+
+		}
 		postSync();
 	}
 
 	void
-	bringIntoSafeState()
-	{
-		int maxAtt;
-		pga()->getDBRange( nullptr, &maxAtt );
-		for ( auto ch = 0; ch < getNumChannels(); ++ch ) {
-			try {
-				fec()->setTermination( ch, false );
-				leds()->setVal( string("Term") + getChannelName( ch )->toStdString(), 0 );
-			} catch ( std::runtime_error &err ) {
-			}
-			try {
-				fec()->setAttenuator( ch, true );
-			} catch ( std::runtime_error &err ) {
-			}
-			try {
-				fec()->setACMode( ch, true );
-			} catch ( std::runtime_error &err ) {
-			}
-			try {
-				pga()->setDBAtt( ch, maxAtt );
-			} catch ( std::runtime_error &err ) {
-			}
-		}
-		acq()->setExtTrigOutEnable( 0 );
-		clrTrgLED();
-	}
+	bringIntoSafeState();
 
 	void
 	quit()
@@ -611,7 +598,6 @@ class FECTerminationTgl : public ScopeTglButton {
 private:
 	std::string         ledName_;
 public:
-
 	FECTerminationTgl( Scope *scp, int channel, QWidget * parent = nullptr )
 	: ScopeTglButton( scp, vector<QString>( {"50Ohm", "1MOhm" } ), channel, parent ),
 	  ledName_( std::string("Term") + scp->getChannelName( channel )->toStdString() )
@@ -782,10 +768,10 @@ public:
 
 class TrigArmMenu : public MenuButton {
 public:
-    enum State { OFF, SINGLE, CONTINUOUS };
+	enum State { OFF, SINGLE, CONTINUOUS };
 private:
 	Scope *scp_;
-    State  state_;
+	State  state_;
 
 	static vector<QString>
 	mkStrings(Scope *scp)
@@ -862,13 +848,13 @@ public:
 	TrigLevel( QLineEdit *edt, Scope *scp )
 	: ParamValidator( edt, new QDoubleValidator(-100.0,100.0,3) ),
 	  MovableMarker(       ),
-      scp_         ( scp   )
+	scp_         ( scp   )
 	{
 		setLineStyle( QwtPlotMarker::HLine );
 		scp_->acq()->getTriggerSrc( &src_, nullptr );
 		lvl_ = scp_->acq()->getTriggerLevelPercent();
 		// hold un-normalized volts
-        vlt_ = raw2Volt( percent2Raw( lvl_ ), false );
+		vlt_ = raw2Volt( percent2Raw( lvl_ ), false );
 		// propagate to text field
 		updateMark();
 		setLabel();
@@ -934,7 +920,7 @@ public:
 	getVal() const
 	{
 		// return normalized volts for the GUI
-        return raw2Volt( percent2Raw( lvl_ ) );
+		return raw2Volt( percent2Raw( lvl_ ) );
 	}
 
 	virtual void
@@ -990,7 +976,7 @@ public:
 		scp_->axisHScl()->keepToRect( &point );
 		MovableMarker::update( point );
 		// store absolute volts and percentage
-        vlt_ = raw2Volt( point.y() , false );
+		vlt_ = raw2Volt( point.y() , false );
 		lvl_ = raw2Percent( point.y() );
 		setLabel( point.x(), point.y() );
 		setValue( point.x(), point.y() );
@@ -1434,7 +1420,7 @@ public:
 		src = mnu->getSrc();
 
 		scp_->acq()->setTriggerSrc( src, rising );
-		scp_->updateTriggerSrc( src );
+		scp_->updateTriggerSrc( src, rising );
 	}
 
 	virtual void visit( TrigEdgMenu *mnu ) override
@@ -1446,7 +1432,7 @@ public:
 		const QString &s = mnu->text();
 		rising = (s == "Rising");
 		scp_->acq()->setTriggerSrc( src, rising );
-		scp_->updateTriggerEdge( rising );
+		scp_->updateTriggerSrc( src, rising );
 	}
 
 	virtual void visit( TrigAutMenu *mnu ) override
@@ -1468,20 +1454,31 @@ public:
 		scp_->updateVScale( sl->channel() );
 	}
 
-	virtual void visit(FECTerminationTgl *tgl) override
-	{
-		scp_->fec()->setTermination( tgl->channel(), tgl->isChecked() );
-		scp_->leds()->setVal( tgl->ledName(), tgl->isChecked() );
-	}
 	virtual void visit(FECAttenuatorTgl *tgl) override
 	{
 		scp_->fec()->setAttenuator( tgl->channel(), tgl->isChecked() );
 		scp_->updateVScale( tgl->channel() );
 	}
 
+	virtual void visit(FECTerminationTgl *tgl) override
+	{
+		scp_->fec()->setTermination( tgl->channel(), tgl->isChecked() );
+		scp_->leds()->setVal( tgl->ledName(), tgl->isChecked() );
+	}
+
 	virtual void visit(FECACCouplingTgl *tgl) override
 	{
 		scp_->fec()->setACMode( tgl->channel(), tgl->isChecked() );
+	}
+
+	virtual void visit(TrigLevel *lvl) override
+	{
+		scp_->acq()->setTriggerLevelPercent( lvl->levelPercent() );
+	}
+
+	virtual void visit(CalDAC *dac) override
+	{
+		scp_->slowDAC()->setVolts( dac->getChannel(), dac->getDbl() );
 	}
 
 	virtual void visit(ExtTrigOutEnTgl *tgl) override
@@ -1493,12 +1490,8 @@ public:
 			}
 		} else {
 			scp_->acq()->setExtTrigOutEnable( tgl->isChecked() );
+			scp_->currentParams()->acqParams.trigOutEn = tgl->isChecked();
 		}
-	}
-
-	virtual void visit(TrigLevel *lvl) override
-	{
-		scp_->acq()->setTriggerLevelPercent( lvl->levelPercent() );
 	}
 
 	virtual void visit(NPreTriggerSamples *npts) override
@@ -1513,9 +1506,97 @@ public:
 		scp_->setDecimation( decm->getInt() );
 	}
 
-	virtual void visit(CalDAC *dac) override
-	{
-		scp_->slowDAC()->setVolts( dac->getChannel(), dac->getDbl() );
+	virtual void update(ScopeParamsPtr desired) {
+		bool   changed = false;
+		auto   cur     = scp_->currentParams();
+		double dval;
+		int    ival;
+		if (   ( desired->acqParams.src != cur->acqParams.src )
+		    || ( desired->acqParams.src != cur->acqParams.src ) ) {
+			scp_->acq()->setTriggerSrc( desired->acqParams.src, desired->acqParams.rising );
+			if ( EXT == desired->acqParams.src ) {
+				// fw switched trigOut off automatically 
+				desired->acqParams.trigOutEn = 0;
+
+			}
+			changed = true;
+		}
+
+		if ( EXT == desired->acqParams.src && ( desired->acqParams.trigOutEn > 0 ) ) {
+			throw std::logic_error("should never get here");
+		} else if ( ( ival = desired->acqParams.trigOutEn ) != cur->acqParams.trigOutEn ) {
+			if ( ival >= 0 ) {
+				scp_->acq()->setExtTrigOutEnable( ival > 0 );
+				changed = true;
+			}
+		}
+
+		if (   ( (dval = desired->acqParams.autoTimeoutMS) != cur->acqParams.autoTimeoutMS ) ) {
+			scp_->acq()->setAutoTimeoutMS( dval );
+			changed = true;
+		}
+
+		if ( desired->acqParams.level != cur->acqParams.level ) {
+			scp_->acq()->setTriggerLevelPercent( acq_level_to_percent( desired->acqParams.level ) );
+			changed = true;
+		}
+
+		if ( desired->acqParams.npts != cur->acqParams.npts ) {
+			scp_->acq()->setNPreTriggerSamples( desired->acqParams.npts );
+			scp_->updateHScale();
+			changed = true;
+		}
+
+		if (    ( desired->acqParams.cic0Decimation != cur->acqParams.cic0Decimation )
+		     || ( desired->acqParams.cic0Decimation != cur->acqParams.cic0Decimation ) ) {
+			scp_->acq()->setDecimation( desired->acqParams.cic0Decimation, desired->acqParams.cic1Decimation );
+			scp_->updateHScale();
+			scp_->updateFFTScale();
+			changed = true;
+		}
+
+		for ( unsigned ch = 0; ch < desired->numChannels; ++ch ) {
+			double att = 0.0/0.0;
+			if ( (dval = desired->afeParams[ch].pgaAttDb) != cur->afeParams[ch].pgaAttDb ) {
+				scp_->pga()->setDBAtt( ch, dval );
+				att = dval;
+				changed = true;
+			}
+			if ( (dval = desired->afeParams[ch].fecAttDb) != cur->afeParams[ch].fecAttDb ) {
+				scp_->fec()->setAttenuator( ch, dval > 0.0 );
+				att = isnan(att) ? dval : att + dval;
+				changed = true;
+			}
+			if ( ! isnan(dval ) ) {
+				scp_->updateVScale( ch, att );
+			}
+
+			if ( (dval = desired->afeParams[ch].fecTerminationOhm) != cur->afeParams[ch].fecTerminationOhm ) {
+				bool on = dval < 1000.0;
+				scp_->fec()->setTermination( ch, on );
+				scp_->leds()->setVal( string("Term") + scp_->getChannelName( ch )->toStdString(), on );
+				changed = true;
+			}
+
+			if ( (ival = desired->afeParams[ch].fecCouplingAC) != cur->afeParams[ch].fecCouplingAC ) {
+				if ( ival >= 0 ) {
+					scp_->fec()->setACMode( ch, ival > 0 );
+					changed = true;
+				}
+			}
+
+			if ( (dval = desired->afeParams[ch].dacVolts) != cur->afeParams[ch].dacVolts ) {
+				scp_->slowDAC()->setVolts( ch, dval );
+				changed = true;
+			}
+
+			if ( (ival = desired->afeParams[ch].dacRangeHi) != cur->afeParams[ch].dacRangeHi ) {
+				if ( ival >= 0 ) {
+					scp_->slowDAC()->setRangeHigh( ch, ival > 0 );
+					changed = true;
+				}
+			}
+		}
 	}
 
 };
@@ -1534,7 +1615,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
   trgArm_        ( nullptr   ),
   single_        ( false     ),
   lsync_         ( 0         ),
-  paramUpd_      ( nullptr   )
+  paramUpd_      ( nullptr   ),
+  paramsPool_    ( this      )
 {
 	if ( 0 == nsmpl_ ) {
 		nsmpl_ = NSMPL_DFLT;
@@ -1545,6 +1627,12 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	acq_.setNSamples( nsmpl_ );
 	acq_.flushBuf();
+
+	paramsPool_.add( 10 );
+	currentParams_ = paramsPool_.get();
+	if ( scope_get_params( (*this)->scope(), currentParams_.get() ) ) {
+		throw std::runtime_error("Scope::Scope - scope_get_params() failed");
+	}
 
 	// Create horizontal indices for main plot
 	auto xRange = unique_ptr<double[]>( new double[ nsmpl_ ] );
@@ -1852,7 +1940,7 @@ Scope::mkMainPlot()
 	sclDrw        = new ScaleXfrm( false, "s", this, plot_ );
 	sclDrw->setRawScale( nsmpl_ - 1 );
 	plotScales_.h = sclDrw;
-    updateHScale();
+	updateHScale();
 
 	plot_->setAxisScaleDraw( QwtPlot::xBottom, sclDrw );
 	plot_->setAxisScale( QwtPlot::xBottom, 0,  axisHScl()->rawScale() );
@@ -1959,6 +2047,37 @@ Scope::event(QEvent *event)
 	}
 	return QObject::event( event );
 
+}
+
+void
+Scope::bringIntoSafeState()
+{
+	int maxPgaAtt;
+	double maxFecAtt = 0.0/0.0;
+	pga()->getDBRange( nullptr, &maxPgaAtt );
+	if ( fec() ) {
+		fec()->getDBRange( nullptr, &maxFecAtt );
+	}
+	auto parms = paramsPool_.get( currentParams() );
+	for ( auto ch = 0; ch < getNumChannels(); ++ch ) {
+		if ( ! isnan( parms->afeParams[ch].fecTerminationOhm ) ) {
+			parms->afeParams[ch].fecTerminationOhm = 1.0E6;
+		}
+		if ( ! isnan( parms->afeParams[ch].fecAttDb ) ) {
+			parms->afeParams[ch].fecAttDb = maxFecAtt;
+		}
+		if ( parms->afeParams[ch].fecCouplingAC >= 0 ) {
+			parms->afeParams[ch].fecCouplingAC = 1;
+		}
+		if ( ! isnan( parms->afeParams[ch].pgaAttDb ) ) {
+			parms->afeParams[ch].pgaAttDb = maxPgaAtt;
+		}
+	}
+	if ( parms->acqParams.trigOutEn >= 0 ) {
+		parms->acqParams.trigOutEn = 0;
+	}
+	paramUpd_->update( parms );
+	clrTrgLED();
 }
 
 std::pair<unique_ptr<QHBoxLayout>, QWidget *>
@@ -2226,6 +2345,11 @@ Scope::updateVScale(int ch)
 	} catch ( std::runtime_error &e ) {
 		// no FEC attenuator
 	}
+	updateVScale(ch, att);
+}
+
+void
+Scope::updateVScale(int ch, double att) {
 	double scl = getVoltScale( ch ) * exp10(att/20.0);
 	axisVScl(ch)->setScale( scl );
 	cmd_.scal_[ch] = scl/axisVScl(ch)->rawScale();
