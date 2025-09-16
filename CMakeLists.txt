@@ -28,6 +28,7 @@ set(SRCS
 	"MeasMarker.cpp"
 	"Measurement.cpp"
 	"IntrusiveSharedPointer/IntrusiveShpFreeList.cpp"
+	"ScopeParams.cpp"
 )
 
 set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)
