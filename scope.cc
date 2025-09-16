@@ -495,7 +495,7 @@ protected:
 	// override from QObject
 	bool eventFilter(QObject * obj, QEvent * event) override
 	{
-	        if (event->type() == QEvent::Close)
+        if (event->type() == QEvent::Close)
 		{
 			quit();
 		}
@@ -1543,7 +1543,7 @@ public:
 			}
 		}
 
-		if (   ( (dval = desired->acqParams.autoTimeoutMS) != cur->acqParams.autoTimeoutMS ) ) {
+		if ( ! isnan(dval = desired->acqParams.autoTimeoutMS) && ( dval != cur->acqParams.autoTimeoutMS ) ) {
 			scp_->acq()->setAutoTimeoutMS( dval );
 			changed = true;
 		}
@@ -1578,17 +1578,17 @@ public:
 		for ( unsigned ch = 0; ch < desired->numChannels; ++ch ) {
 			bool vScaleChanged = false;
 
-			if ( (dval = desired->afeParams[ch].fullScaleVolts) != cur->afeParams[ch].fullScaleVolts ) {
+			if ( ! isnan(dval = desired->afeParams[ch].fullScaleVolts) && ( dval!= cur->afeParams[ch].fullScaleVolts ) ) {
 				scp_->Board::setVoltScale(ch, dval);
 				changed       = true;
 				vScaleChanged = true;
 			}
-			if ( (dval = desired->afeParams[ch].pgaAttDb) != cur->afeParams[ch].pgaAttDb ) {
+			if ( ! isnan(dval = desired->afeParams[ch].pgaAttDb) && ( dval!= cur->afeParams[ch].pgaAttDb ) ) {
 				scp_->pga()->setDBAtt( ch, dval );
 				changed       = true;
 				vScaleChanged = true;
 			}
-			if ( (dval = desired->afeParams[ch].fecAttDb) != cur->afeParams[ch].fecAttDb ) {
+			if ( ! isnan(dval = desired->afeParams[ch].fecAttDb) && ( dval != cur->afeParams[ch].fecAttDb ) ) {
 				scp_->fec()->setAttenuator( ch, dval );
 				changed       = true;
 				vScaleChanged = true;
@@ -1608,7 +1608,7 @@ public:
 				scp_->updateVScale( ch, scl );
 			}
 
-			if ( (dval = desired->afeParams[ch].fecTerminationOhm) != cur->afeParams[ch].fecTerminationOhm ) {
+			if ( ! isnan(dval = desired->afeParams[ch].fecTerminationOhm) && ( dval != cur->afeParams[ch].fecTerminationOhm ) ) {
 				bool on = dval < 1000.0;
 				scp_->fec()->setTermination( ch, on );
 				scp_->leds()->setVal( string("Term") + scp_->getChannelName( ch )->toStdString(), on );
@@ -1622,7 +1622,7 @@ public:
 				}
 			}
 
-			if ( (dval = desired->afeParams[ch].dacVolts) != cur->afeParams[ch].dacVolts ) {
+			if ( ! isnan(dval = desired->afeParams[ch].dacVolts) && ( dval != cur->afeParams[ch].dacVolts ) ) {
 				scp_->slowDAC()->setVolts( ch, dval );
 				changed = true;
 			}
@@ -2096,23 +2096,28 @@ Scope::cloneScopeParams()
 void
 Scope::bringIntoSafeState()
 {
-	int maxPgaAtt;
-	double maxFecAtt = 0.0/0.0;
-	pga()->getDBRange( nullptr, &maxPgaAtt );
-	if ( fec() ) {
-		fec()->getDBRange( nullptr, &maxFecAtt );
-	}
 	auto parms = cloneScopeParams();
+	try {
+		double maxFecAtt = 0.0/0.0;
+		fec()->getDBRange( nullptr, &maxFecAtt );
+		for ( auto ch = 0; ch < getNumChannels(); ++ch ) {
+			if ( ! isnan( parms->afeParams[ch].fecTerminationOhm ) ) {
+				parms->afeParams[ch].fecTerminationOhm = 1.0E6;
+			}
+			if ( ! isnan( parms->afeParams[ch].fecAttDb ) ) {
+				parms->afeParams[ch].fecAttDb = maxFecAtt;
+			}
+			if ( parms->afeParams[ch].fecCouplingAC >= 0 ) {
+				parms->afeParams[ch].fecCouplingAC = 1;
+			}
+		}
+	} catch ( std::runtime_error &e ) {
+		// no FEC;
+	}
+
+	int maxPgaAtt;
+	pga()->getDBRange( nullptr, &maxPgaAtt );
 	for ( auto ch = 0; ch < getNumChannels(); ++ch ) {
-		if ( ! isnan( parms->afeParams[ch].fecTerminationOhm ) ) {
-			parms->afeParams[ch].fecTerminationOhm = 1.0E6;
-		}
-		if ( ! isnan( parms->afeParams[ch].fecAttDb ) ) {
-			parms->afeParams[ch].fecAttDb = maxFecAtt;
-		}
-		if ( parms->afeParams[ch].fecCouplingAC >= 0 ) {
-			parms->afeParams[ch].fecCouplingAC = 1;
-		}
 		if ( ! isnan( parms->afeParams[ch].pgaAttDb ) ) {
 			parms->afeParams[ch].pgaAttDb = maxPgaAtt;
 		}
@@ -2627,6 +2632,10 @@ double      scale    = -1.0;
 		fnam = "/dev/ttyACM0";
 	}
 
+	// Creating the QApplication produces this error message:
+	//
+	//   QSocketNotifier: Can only be used with threads started with QThread
+	// 
 	QApplication app(argc, argv);
 
 	while ( (opt = getopt( argc, argv, "d:hn:p:rsS:" )) > 0 ) {
@@ -2662,7 +2671,6 @@ double      scale    = -1.0;
 	} catch (std::exception &e) {
 		fprintf(stderr, "Unable to load style sheet: %s\n", e.what());
 	}
-
 
 	Scope sc( FWComm::create( fnam ), sim, nsamples );
 	if ( scale > 0.0 ) {
