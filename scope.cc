@@ -580,6 +580,7 @@ class FECTerminationTgl : public ScopeTglButton {
 private:
 	std::string         ledName_;
 public:
+	// 'checked' selects 1st label
 	FECTerminationTgl( Scope *scp, int channel, QWidget * parent = nullptr )
 	: ScopeTglButton( scp, vector<QString>( {"50Ohm", "1MOhm" } ), channel, parent ),
 	  ledName_( std::string("Term") + scp->getChannelName( channel )->toStdString() )
@@ -609,8 +610,9 @@ public:
 class FECACCouplingTgl : public ScopeTglButton {
 public:
 
+	// 'checked' selects 1st label
 	FECACCouplingTgl( Scope *scp, int channel, QWidget * parent = nullptr )
-	: ScopeTglButton( scp, vector<QString>( {"DC", "AC" } ), channel, parent )
+	: ScopeTglButton( scp, vector<QString>( {"AC", "DC" } ), channel, parent )
 	{
 		setLbl( getVal() );
 	}
@@ -622,15 +624,27 @@ public:
 
 	virtual bool getVal() override
 	{
-		return scp_->fec()->getACMode( channel() );
+		bool v = scp_->fec()->getACMode( channel() );
+		return v;
 	}
 };
 
 class FECAttenuatorTgl : public ScopeTglButton {
+
+	static vector<QString> labels(Scope *scp) {
+		double min, max;
+		scp->fec()->getDBRange( &min, &max );
+		vector<QString> v;
+		// 'checked' selects 1st label
+		v.push_back( ( std::to_string(int(round(max))) + "dB" ).c_str() );
+		v.push_back( ( std::to_string(int(round(min))) + "dB" ).c_str() );
+		return v;
+	}
+
 public:
 
 	FECAttenuatorTgl( Scope *scp, int channel, QWidget * parent = nullptr )
-	: ScopeTglButton( scp, vector<QString>( {"-20dB", "0dB" } ), channel, parent )
+	: ScopeTglButton( scp, labels(scp), channel, parent )
 	{
 		setLbl( getVal() );
 	}
@@ -642,7 +656,7 @@ public:
 
 	virtual bool getVal() override
 	{
-		return scp_->fec()->getAttenuator( channel() );
+		return scp_->fec()->isAttenuatorOn( channel() );
 	}
 };
 
