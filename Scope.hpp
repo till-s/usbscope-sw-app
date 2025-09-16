@@ -10,12 +10,10 @@
 
 static  constexpr size_t FIX_HARDCODED_NCH = 2;
 
-template <size_t NCH>
-struct ScopeReaderCmdTmpl : AcqSettings<NCH>  {
-    bool                stop_{ false };
+struct ScopeReaderCmd : AcqSettings {
+	bool            stop_{ false };
 };
 
-typedef ScopeReaderCmdTmpl<FIX_HARDCODED_NCH> ScopeReaderCmd;
 typedef ADCBufPool<double,FIX_HARDCODED_NCH>  BufPoolType;
 typedef std::shared_ptr< BufPoolType >        BufPoolPtr;
 typedef BufPoolType::ADCBufType               BufType;

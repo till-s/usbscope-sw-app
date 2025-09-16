@@ -11,7 +11,8 @@ class ScopeParams : public IntrusiveSmart::FreeListNode, public ::ScopeParams {
 
 };
 
-typedef IntrusiveSmart::Shp<impl::ScopeParams> ScopeParamsPtr;
+typedef IntrusiveSmart::Shp<impl::ScopeParams>       ScopeParamsPtr;
+typedef IntrusiveSmart::Shp<const impl::ScopeParams> ScopeParamsCPtr;
 
 class ScopeParamsPool : public IntrusiveSmart::FreeListBase, public BoardRef {
 public:

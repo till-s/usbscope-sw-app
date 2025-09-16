@@ -100,7 +100,7 @@ ScopeReader::run()
 		if ( got > 0 ) {
 			unsigned nelms = got / bytesPerSmpl_;
 			// initHdr must be called first (sets nelms_)
-			buf->initHdr( cmd, hdr, nelms );
+			buf->initHdr( &cmd, hdr, nelms );
 			for ( int ch = 0; ch < bufPool_->NumChannels; ch++ ) {
 				readBuf_->copyCh( buf, ch );
 				fftw_execute_dft_r2c( fftwPlan_, buf->getData( ch ), buf->getFFT( ch ) );

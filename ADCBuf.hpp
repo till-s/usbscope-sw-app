@@ -4,31 +4,26 @@
 #include <time.h>
 #include <memory>
 #include <vector>
+#include <fftw3.h>
+
 #include <IntrusiveShpFreeList.hpp>
 #include <IntrusiveShp.hpp>
 #include <AcqCtrl.hpp>
-#include <fftw3.h>
+#include <ScopeParams.hpp>
 
-template <size_t NCH>
 struct AcqSettings {
 	unsigned            sync_{0};     // count/flag that can be used to sync parameter changes across fifo domains
-	unsigned            npts_{0};     // # pre-trigger samples
-	unsigned            decm_{1};     // Decimation
-	double              scal_[NCH];   // current scale factors
-	TriggerSource       tsrc_{CHA};   // trigger source
-	int                 rise_{1};     // trigger edge
+	ScopeParamsCPtr     scopeParams_;
 
-	size_t
-	numChannels()
-	{
-		return NCH;
+	unsigned getSync() const {
+		return sync_;
 	}
 };
 
 template <typename T, size_t NCH> class ADCBufPool;
 
 template <typename T, size_t NCH = 2>
-class ADCBuf : public IntrusiveSmart::FreeListNode, public AcqSettings<NCH> {
+class ADCBuf : public IntrusiveSmart::FreeListNode, public AcqSettings {
 	typedef IntrusiveSmart::Shp<ADCBuf>  ADCBufPtr;
 private:
 	unsigned               stride_;     // elements in buffer: stride_*NCH
@@ -81,30 +76,11 @@ public:
 	}
 
 	void
-	initHdr(const AcqSettings<NCH> &settings, unsigned hdr, unsigned nelms = 0)
+	initHdr(AcqSettings *cmd, unsigned hdr, unsigned nelms = 0)
 	{
+		*static_cast<AcqSettings*>(this) = *cmd;
 		setTime();
-		this->hdr_   = hdr;
-		* static_cast< AcqSettings<NCH> *>( this ) = settings;
-		if ( nelms > stride_ ) {
-			throw std::runtime_error("nelms exceeds allowed maximum");
-		}
-		nelms_ = (nelms ? nelms : stride_);
-	}
-
-	void
-	initHdr(unsigned hdr, unsigned npts, unsigned sync, unsigned decm, const double scale[NCH], TriggerSource src, int risingEdge, unsigned nelms = 0)
-	{
-		setTime();
-		this->hdr_   = hdr;
-		this->npts_  = npts;
-		this->sync_  = sync;
-		this->decm_  = decm;
-		this->tsrc_  = src;
-		this->rise_  = risingEdge;
-		for ( auto i = 0; i < NCH; ++i ) {
-			this->scal_[i] = scale[i];
-		}
+		this->hdr_         = hdr;
 		if ( nelms > stride_ ) {
 			throw std::runtime_error("nelms exceeds allowed maximum");
 		}
@@ -130,12 +106,6 @@ public:
 	}
 
 	unsigned
-	getSync() const
-	{
-		return this->sync_;
-	}
-
-	unsigned
 	getNElms() const
 	{
 		return nelms_;
@@ -150,42 +120,42 @@ public:
 	unsigned
 	getNPreTriggerSamples() const
 	{
-		return this->npts_;
+		return scopeParams_->acqParams.npts;
 	}
 
 	unsigned
 	getDecimation() const
 	{
-		return this->decm_;
+		return scopeParams_->acqParams.cic0Decimation * scopeParams_->acqParams.cic1Decimation;
 	}
 
 	double
 	getScale(unsigned ch) const
 	{
-		if ( ch >= NCH ) {
+		if ( ch >= scopeParams_->numChannels ) {
 			abort();
 		}
-		return this->scal_[ch];
+		return scopeParams_->afeParams[ch].currentScaleVolts;
 	}
 
 	TriggerSource
 	getTriggerSource() const
 	{
-		return this->tsrc_;
+		return scopeParams_->acqParams.src;
 	}
 
 	bool
 	getTriggerEdgeRising() const
 	{
-		return this->rise_;
+		return scopeParams_->acqParams.rising;
 	}
 
 	std::vector<double>
 	getScale() const
 	{
 		std::vector<double> v;
-		for ( auto ch = 0; ch < NCH; ++ch ) {
-			v.push_back(this->scal_[ch]);
+		for ( auto ch = 0; ch < scopeParams_->numChannels; ++ch ) {
+			v.push_back( getScale(ch) );
 		}
 		return v;
 	}

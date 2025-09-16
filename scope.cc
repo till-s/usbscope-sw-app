@@ -173,10 +173,16 @@ public:
 	updateVScale(int channel);
 
 	void
-	updateVScale(int channel, double att);
+	updateVScale(int channel, double scl);
+
+	virtual void
+	setVoltScale(int channel, double voltScale) override;
 
 	double
 	getTriggerOffset(BufPtr);
+
+	void
+	updateHScale(ScopeParamsCPtr scopeParams);
 
 	void
 	updateHScale();
@@ -271,15 +277,6 @@ public:
 		return &vChannelNames_[channel];
 	}
 
-	void
-	setVoltScale(int channel, double fullScaleVolts)
-	{
-		if ( channel < 0 || channel >= numChannels() )
-			throw std::invalid_argument( "invalid channel idx" );
-		Board::setVoltScale(channel, fullScaleVolts);
-		updateVScale( channel );
-	}
-
 	AcqCtrl *
 	acq()
 	{
@@ -366,7 +363,7 @@ public:
 	unsigned
 	getDecimation()
 	{
-		return cmd_.decm_;
+		return currentParams()->acqParams.cic0Decimation * currentParams()->acqParams.cic1Decimation;
 	}
 
 	void
@@ -394,14 +391,6 @@ public:
 	void
 	updateTriggerSrc(TriggerSource src, int rising)
 	{
-		cmd_.tsrc_ = src;
-		cmd_.rise_ = rising;
-		currentParams()->acqParams.src    = src;
-		currentParams()->acqParams.rising = rising;
-		if ( EXT != src ) {
-			currentParams()->acqParams.trigOutEn = 0;
-
-		}
 		postSync();
 	}
 
@@ -511,15 +500,15 @@ public:
 
 protected:
 	// override from QObject
-    bool eventFilter(QObject * obj, QEvent * event) override
-    {
-        if (event->type() == QEvent::Close)
-        {
+	bool eventFilter(QObject * obj, QEvent * event) override
+	{
+	        if (event->type() == QEvent::Close)
+		{
 			quit();
-        }
+		}
 
-        return QObject::eventFilter(obj, event);
-    }
+		return QObject::eventFilter(obj, event);
+	}
 };
 
 class TrigSrcMenu : public MenuButton {
@@ -1511,6 +1500,7 @@ public:
 		auto   cur     = scp_->currentParams();
 		double dval;
 		int    ival;
+
 		if (   ( desired->acqParams.src != cur->acqParams.src )
 		    || ( desired->acqParams.src != cur->acqParams.src ) ) {
 			scp_->acq()->setTriggerSrc( desired->acqParams.src, desired->acqParams.rising );
@@ -1541,34 +1531,59 @@ public:
 			changed = true;
 		}
 
+		int hScaleUpdate = 0;
+
 		if ( desired->acqParams.npts != cur->acqParams.npts ) {
 			scp_->acq()->setNPreTriggerSamples( desired->acqParams.npts );
-			scp_->updateHScale();
+			hScaleUpdate = 1;
 			changed = true;
 		}
 
 		if (    ( desired->acqParams.cic0Decimation != cur->acqParams.cic0Decimation )
 		     || ( desired->acqParams.cic0Decimation != cur->acqParams.cic0Decimation ) ) {
 			scp_->acq()->setDecimation( desired->acqParams.cic0Decimation, desired->acqParams.cic1Decimation );
-			scp_->updateHScale();
-			scp_->updateFFTScale();
+			hScaleUpdate = 2;
 			changed = true;
 		}
 
+		if ( hScaleUpdate ) {
+			scp_->updateHScale( desired );
+			if ( hScaleUpdate > 1 ) {
+				scp_->updateFFTScale();
+			}
+		}
+
 		for ( unsigned ch = 0; ch < desired->numChannels; ++ch ) {
-			double att = 0.0/0.0;
+			bool vScaleChanged = false;
+
+			if ( (dval = desired->afeParams[ch].fullScaleVolts) != cur->afeParams[ch].fullScaleVolts ) {
+				scp_->Board::setVoltScale(ch, dval);
+				changed       = true;
+				vScaleChanged = true;
+			}
 			if ( (dval = desired->afeParams[ch].pgaAttDb) != cur->afeParams[ch].pgaAttDb ) {
 				scp_->pga()->setDBAtt( ch, dval );
-				att = dval;
-				changed = true;
+				changed       = true;
+				vScaleChanged = true;
 			}
 			if ( (dval = desired->afeParams[ch].fecAttDb) != cur->afeParams[ch].fecAttDb ) {
 				scp_->fec()->setAttenuator( ch, dval > 0.0 );
-				att = isnan(att) ? dval : att + dval;
-				changed = true;
+				changed       = true;
+				vScaleChanged = true;
 			}
-			if ( ! isnan(dval ) ) {
-				scp_->updateVScale( ch, att );
+
+			if ( vScaleChanged ) {
+				double att = 0;
+				double v;
+				if ( ! isnan( (v = desired->afeParams[ch].pgaAttDb) ) ) {
+					att += v;
+				}
+				if ( ! isnan( (v = desired->afeParams[ch].fecAttDb) ) ) {
+					att += v;
+				}
+				double scl = desired->afeParams[ch].fullScaleVolts * exp10(att/20.0);
+				desired->afeParams[ch].currentScaleVolts = scl;
+				scp_->updateVScale( ch, scl );
 			}
 
 			if ( (dval = desired->afeParams[ch].fecTerminationOhm) != cur->afeParams[ch].fecTerminationOhm ) {
@@ -1740,7 +1755,6 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	// #-of pre-trigger samples (mapped to time)
 	editWid       = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	auto npts     = new NPreTriggerSamples( editWid.get(), this );
-	cmd_.npts_    = npts->getVal();
 	npts->subscribe( paramUpd_ );
 	auto trigDlyLblUP = unique_ptr<TrigDelayLbl>( new TrigDelayLbl( this ) );
 	auto trigDlyLbl   = trigDlyLblUP.get();
@@ -1750,10 +1764,6 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	// Decimation
 	{
-	unsigned cic0, cic1;
-	acq_.getDecimation( &cic0, &cic1 );
-	cmd_.decm_    = cic0*cic1;
-
 	editWid       = unique_ptr<QLineEdit>  ( new QLineEdit()   );
 	auto decm     = new Decimation( editWid.get(), this );
 	decm->subscribe( paramUpd_ );
@@ -1875,8 +1885,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	// dockable widget for FFT
 	auto fftDockWid  = new QDockWidget( QString("FFT"), mainWin_.get() );
 
-    fftDockWid->setAllowedAreas( Qt::BottomDockWidgetArea );
-    mainWin_->addDockWidget( Qt::BottomDockWidgetArea, fftDockWid );
+	fftDockWid->setAllowedAreas( Qt::BottomDockWidgetArea );
+	mainWin_->addDockWidget( Qt::BottomDockWidgetArea, fftDockWid );
 
 	// create FFT plot
 	{
@@ -1909,7 +1919,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 //	plot_->setAxisScaleEngine( QwtPlot::yRight,  new ScopeSclEng( axisVScl(CHB_IDX) ) );
 //	plot_->setAxisScaleEngine( QwtPlot::xBottom, new ScopeSclEng( axisHScl()     ) );
 
-    paramUpd.release();
+	paramUpd.release();
 	xRange.release();
 	fRange.release();
 }
@@ -2080,6 +2090,16 @@ Scope::bringIntoSafeState()
 	clrTrgLED();
 }
 
+void
+Scope::setVoltScale(int channel, double voltScale) {
+	auto newParams = paramsPool_.get( currentParams() );
+	if ( channel >= newParams->numChannels ) {
+		throw std::invalid_argument("invalid channel index");
+	}
+	newParams->afeParams[channel].fullScaleVolts = voltScale;
+	paramUpd_->update( newParams );
+}
+
 std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 Scope::mkGainControls( int channel, QColor &color )
 {
@@ -2236,7 +2256,6 @@ Scope::stopReader()
 void
 Scope::updateNPreTriggerSamples(unsigned npts)
 {
-	cmd_.npts_ = npts;
 	updateHScale();
 	postSync();
 }
@@ -2244,7 +2263,6 @@ Scope::updateNPreTriggerSamples(unsigned npts)
 void
 Scope::setDecimation(unsigned d)
 {
-	cmd_.decm_ = d;
 	acq_.setDecimation( d );
 	updateHScale();
 	updateFFTScale();
@@ -2260,13 +2278,16 @@ Scope::getZoom()
 void
 Scope::updateHScale()
 {
-	unsigned cic0, cic1;
+	updateHScale( currentParams() );
+}
 
-	acq_.getDecimation( &cic0, &cic1 );
+void
+Scope::updateHScale(ScopeParamsCPtr scopeParams)
+{
+	double   decm  = scopeParams->acqParams.cic0Decimation;
+	         decm *= scopeParams->acqParams.cic1Decimation;
 
-	double   decm = cic0*cic1;
-
-	double   npts = acq_.getNPreTriggerSamples();
+	double   npts  = scopeParams->acqParams.npts;
 
 	axisHScl()->setRawOffset( npts );
 	axisHScl()->setScale( getNSamples() * decm / getADCClkFreq() );
@@ -2278,7 +2299,7 @@ Scope::updateFFTScale()
 	// with noise power ~ 1tick RMS
 	double decm  = getDecimation();
 	double minDB = -10.0*log10(exp2(2.0*(getSampleSize()-1.0))*getNSamples()*decm);
-    secPlot_->setAxisScale( QwtPlot::yLeft, fftVScl(0)->linv(minDB), fftVScl(0)->linv(0.0) );
+	secPlot_->setAxisScale( QwtPlot::yLeft, fftVScl(0)->linv(minDB), fftVScl(0)->linv(0.0) );
 
 	fftHScl()->setScale( getADCClkFreq() / decm );
 }
@@ -2337,22 +2358,12 @@ Scope::getTriggerOffset(BufPtr buf)
 void
 Scope::updateVScale(int ch)
 {
-	double att = pga()->getDBAtt( ch );
-	try {
-		if ( fec()->getAttenuator( ch ) ) {
-			att += 20.0;
-		}
-	} catch ( std::runtime_error &e ) {
-		// no FEC attenuator
-	}
-	updateVScale(ch, att);
+	updateVScale(ch, currentParams()->afeParams[ch].currentScaleVolts);
 }
 
 void
-Scope::updateVScale(int ch, double att) {
-	double scl = getVoltScale( ch ) * exp10(att/20.0);
+Scope::updateVScale(int ch, double scl) {
 	axisVScl(ch)->setScale( scl );
-	cmd_.scal_[ch] = scl/axisVScl(ch)->rawScale();
 	postSync();
 }
 
