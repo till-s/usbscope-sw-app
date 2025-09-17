@@ -65,21 +65,6 @@ class TrigSrcMenu;
 class TrigLevel;
 class ParamUpdateVisitor;
 
-class CloseMainEventFilter : public QObject
-{
-protected:
-    bool eventFilter(QObject * obj, QEvent * event) override
-    {
-        if (event->type() == QEvent::Close)
-        {
-            printf( "CLOSING\n" );
-			fflush( stdout );
-        }
-
-        return QObject::eventFilter(obj, event);
-    }
-};
-
 class SampleMeasurement : public Measurement {
 	Scope *scp_;
 public:
