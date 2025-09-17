@@ -25,6 +25,7 @@
 #include <QLineEdit>
 #include <QValidator>
 #include <QFileDialog>
+#include <QInputDialog>
 #include <QToolButton>
 
 #include <qwt_text.h>
@@ -131,6 +132,7 @@ private:
 	ParamUpdateVisitor                   *paramUpd_;
 	bool                                  safeQuit_ {true};
 	string                                saveToDir_ {"."};
+	QString                               comment_;
 	ScopeParamsPool                       paramsPool_;
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
@@ -399,6 +401,12 @@ public:
 	void
 	saveToFile()
 	{
+		saveToFileWithComment( false );
+	}
+
+	void
+	saveToFileWithComment(bool addComment)
+	{
 		BufPtr buf = curBuf_;
 		if ( ! buf ) {
 			message( "Have no data to save" );
@@ -435,11 +443,31 @@ public:
 				h5f.addHSlab( nullptr, nullptr, buf->getRawData() );
 				h5f.addHdrInfo( buf->getHdr(), buf->getNumChannels() );
 				h5f.addScopeParams( buf->scopeParams_.get() );
+
+				if ( addComment ) {
+					h5f.addComment( comment_.toStdString() );
+				}
 			} catch ( std::runtime_error &e ) {
 				message( e.what() );
 				// remove file if something failed
 				unlink( fileName.c_str() );
 			}
+		}
+	}
+
+	void
+	editComment()
+	{
+		bool    ok   = false;
+		QString text = QInputDialog::getMultiLineText(
+							mainWin_.get(),
+							"ScOpen HDF5 Comment Dialog",
+							"Comment Added to HDF5 File",
+							comment_,
+							&ok);
+		if ( ok ) {
+			comment_ = text;
+			saveToFileWithComment( true );
 		}
 	}
 
@@ -566,8 +594,8 @@ class DACRangeTgl : public ScopeTglButton {
 	static vector<QString> labels( Scope *scp, int channel )
 	{
 		vector<QString> rv;
-		rv.push_back( (*scp->getChannelName(channel) + " (lo-range)") );
-		rv.push_back( (*scp->getChannelName(channel) + " (hi-range)") );
+		rv.push_back( (*scp->getChannelName(channel) + " hi-range") );
+		rv.push_back( (*scp->getChannelName(channel) + " lo-range") );
 		return rv;
 	}
 public:
@@ -1851,7 +1879,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 			w->setStyleSheet( vChannelStyles_[ch] );
 			vInp.push_back( unique_ptr< FECTerminationTgl >( w ) );
 			w->subscribe( paramUpd_ );
-		} catch ( std::runtime_error & ) { printf("FEC Caught\n"); }
+		} catch ( std::runtime_error & ) {}
 		try {
 			auto w = new FECACCouplingTgl( this, ch );
 			vInp.push_back( unique_ptr< QWidget >( w ) );
@@ -1966,6 +1994,11 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	auto act      = unique_ptr<QAction>( new QAction( "Save Waveform To" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::saveToFile );
 	fileMen->addAction( act.release() );
+
+	act           = unique_ptr<QAction>( new QAction( "Comment and Save Waveform To" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::editComment );
+	fileMen->addAction( act.release() );
+	
 
 	fileMen->addAction( fftDockWid->toggleViewAction() );
 
@@ -2207,19 +2240,6 @@ Scope::mkGainControls( int channel, QColor &color )
 
 	return rv;
 }
-
-class QSM : public QObject {
-public:
-	void foo ()
-	{
-		printf("Started\n");
-	}
-
-	void bar(const QString &)
-	{
-		printf("BAR\n");
-	}
-};
 
 void
 Scope::newData(BufPtr buf)
