@@ -21,6 +21,7 @@ class Decimation;
 class Measurement;
 class MeasDiff;
 class CalDAC;
+class DACRangeTgl;
 
 class ValChangedVisitor
 {
@@ -42,6 +43,7 @@ public:
 	virtual void visit(Measurement        *) {}
 	virtual void visit(MeasDiff           *) {}
 	virtual void visit(CalDAC             *) {}
+	virtual void visit(DACRangeTgl        *) {}
 };
 
 template <typename T>

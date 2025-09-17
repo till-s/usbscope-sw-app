@@ -25,6 +25,7 @@
 #include <QLineEdit>
 #include <QValidator>
 #include <QFileDialog>
+#include <QToolButton>
 
 #include <qwt_text.h>
 #include <qwt_scale_div.h>
@@ -561,6 +562,35 @@ public:
 	}
 };
 
+class DACRangeTgl : public ScopeTglButton {
+	static vector<QString> labels( Scope *scp, int channel )
+	{
+		vector<QString> rv;
+		rv.push_back( (*scp->getChannelName(channel) + " (lo-range)") );
+		rv.push_back( (*scp->getChannelName(channel) + " (hi-range)") );
+		return rv;
+	}
+public:
+	DACRangeTgl( Scope *scp, int channel, QWidget *parent = nullptr )
+	: ScopeTglButton( scp, labels( scp, channel ), channel, parent )
+	{
+		if ( 0 &&  scp_->currentParams()->afeParams[this->channel()].dacRangeHi < 0 ) {
+			throw std::runtime_error("No CAC range controls");
+		}
+		setLbl( getVal() );
+	}
+
+	virtual void accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+
+	virtual bool getVal() override
+	{
+		return scp_->currentParams()->afeParams[channel()].dacRangeHi;
+	}
+};
+
 class FECTerminationTgl : public ScopeTglButton {
 private:
 	std::string         ledName_;
@@ -588,6 +618,7 @@ public:
 
 	virtual bool getVal() override
 	{
+		// TODO could use currentParams()
 		return scp_->fec()->getTermination( channel() );
 	}
 };
@@ -599,6 +630,9 @@ public:
 	FECACCouplingTgl( Scope *scp, int channel, QWidget * parent = nullptr )
 	: ScopeTglButton( scp, vector<QString>( {"AC", "DC" } ), channel, parent )
 	{
+		if ( scp_->currentParams()->afeParams[this->channel()].fecCouplingAC < 0 ) {
+			throw std::runtime_error("No AC coupling controls");
+		}
 		setLbl( getVal() );
 	}
 
@@ -609,8 +643,7 @@ public:
 
 	virtual bool getVal() override
 	{
-		bool v = scp_->fec()->getACMode( channel() );
-		return v;
+		return scp_->currentParams()->afeParams[channel()].fecCouplingAC;
 	}
 };
 
@@ -641,6 +674,7 @@ public:
 
 	virtual bool getVal() override
 	{
+		// TODO could use currentParams()
 		return scp_->fec()->isAttenuatorOn( channel() );
 	}
 };
@@ -674,6 +708,7 @@ public:
 
 	virtual bool getVal() override
 	{
+		// TODO could use currentParams()
 		bool rv = scp_->acq()->getExtTrigOutEnable();
 		return rv;
 	}
@@ -1455,6 +1490,13 @@ public:
 		update( p );
 	}
 
+	virtual void visit(DACRangeTgl *tgl) override
+	{
+		auto  p          = scp_->cloneScopeParams();
+		p->afeParams[tgl->channel()].dacRangeHi = (tgl->isChecked() ? 1 : 0);
+		update( p );
+	}
+
 	virtual void visit(TrigLevel *lvl) override
 	{
 		auto  p            = scp_->cloneScopeParams();
@@ -1804,23 +1846,22 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	bool inpHasTitle = false;
 	for ( int ch = 0; ch < numChannels(); ch++ ) {
 		vector< unique_ptr< QWidget > > vInp;
-		QString styleString( QString("color: ") + vChannelColors_[ch].name() );
 		try {
 			auto w = new FECTerminationTgl( this, ch );
-			w->setStyleSheet( styleString );
+			w->setStyleSheet( vChannelStyles_[ch] );
 			vInp.push_back( unique_ptr< FECTerminationTgl >( w ) );
 			w->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) { printf("FEC Caught\n"); }
 		try {
 			auto w = new FECACCouplingTgl( this, ch );
 			vInp.push_back( unique_ptr< QWidget >( w ) );
-			w->setStyleSheet( styleString );
+			w->setStyleSheet( vChannelStyles_[ch] );
 			w->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) {}
 		try {
 			auto w = new FECAttenuatorTgl( this, ch );
 			vInp.push_back( unique_ptr< QWidget >( w ) );
-			w->setStyleSheet( styleString );
+			w->setStyleSheet( vChannelStyles_[ch] );
 			w->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) {}
 		if ( vInp.size() > 0 ) {
@@ -1839,11 +1880,10 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	// DAC controls
 	bool dacHasTitle = false;
 	for ( int ch = 0; ch < numChannels(); ch++ ) {
-		QString styleString( QString("color: ") + vChannelColors_[ch].name() );
 		std::unique_ptr<CalDAC> dac;
 		try {
 			editWid  = unique_ptr<QLineEdit>  ( new QLineEdit() );
-			editWid->setStyleSheet( styleString );
+			editWid->setStyleSheet( vChannelStyles_[ch] );
 			dac = unique_ptr<CalDAC> ( new CalDAC( editWid.release(), this, ch ) );
 			dac->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) {}
@@ -1852,8 +1892,19 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 				formLay->addRow( new QLabel( "Calibration DAC:" ) );
 				dacHasTitle = true;
 			}
-			auto lbl = unique_ptr<QLabel>( new QLabel( *getChannelName( ch ) ) );
-			lbl->setStyleSheet( styleString );
+
+			unique_ptr<QWidget> lbl;
+			try {
+				auto rng = unique_ptr<DACRangeTgl>( new DACRangeTgl( this, ch ) );
+				rng->setStyleSheet( vChannelStyles_[ch] + "; text-align:left" );
+				rng->setFlat( true );
+				rng->subscribe( paramUpd_ );
+				lbl = std::move( rng );
+			} catch ( std::runtime_error & ) {
+				auto txt = unique_ptr<QLabel>( new QLabel( *getChannelName(ch) ) );
+				txt->setStyleSheet( vChannelStyles_[ch] );
+				lbl = std::move( txt );
+			}
 			formLay->addRow( lbl.release(), dac.release()->getEditWidget() );
 		}
 	}
