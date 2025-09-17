@@ -1,0 +1,12 @@
+[submodule "IntrusiveSharedPointer"]
+	path = IntrusiveSharedPointer
+	url = ../IntrusiveSharedPointer
+	branch = main
+[submodule "fwcommCPP"]
+	path = fwcommCPP
+	url = ../usbscope-sw-lib.git
+	branch = main
+[submodule "usbadc-support"]
+	path = usbadc-support
+	url = ../usbadc-support
+	branch = main
