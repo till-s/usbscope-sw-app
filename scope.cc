@@ -1578,8 +1578,8 @@ public:
 		double dval;
 		int    ival;
 
-		if (   ( desired->acqParams.src != cur->acqParams.src )
-		    || ( desired->acqParams.src != cur->acqParams.src ) ) {
+		if (   ( desired->acqParams.src    != cur->acqParams.src    )
+		    || ( desired->acqParams.rising != cur->acqParams.rising ) ) {
 			scp_->acq()->setTriggerSrc( desired->acqParams.src, desired->acqParams.rising );
 			if ( EXT == desired->acqParams.src ) {
 				// fw switched trigOut off automatically 
