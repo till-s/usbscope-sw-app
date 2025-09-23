@@ -66,6 +66,155 @@ class TrigArmMenu;
 class TrigSrcMenu;
 class TrigLevel;
 class ParamUpdateVisitor;
+class ChannelCtrl;
+
+class ChannelObject {
+public:
+	virtual void setEnabled( bool ) = 0;
+	virtual ~ChannelObject()   = default;
+};
+
+class ChannelWidget : public ChannelObject {
+	QWidget *widget_;
+	bool     isControl_;
+public:
+	ChannelWidget( QWidget *w, bool isControl )
+	: widget_   ( w         ),
+	  isControl_( isControl )
+	{
+		if ( ! isControl ) {
+			auto pol = widget_->sizePolicy();
+			pol.setRetainSizeWhenHidden( true );
+			widget_->setSizePolicy( pol );
+		}
+	}
+
+	virtual void setEnabled( bool on ) override
+	{
+		if ( isControl_ ) {
+			widget_->setEnabled( on );
+		} else {
+			widget_->setVisible( on );
+		}
+	}
+};
+
+class ChannelCurve : public ChannelObject {
+	ScopePlot      *plot_;
+	unsigned        chnl_;
+public:
+	ChannelCurve( ScopePlot *plot, unsigned channel )
+	: plot_  ( plot    ),
+	  chnl_  ( channel )
+	{
+	}
+
+	virtual void setEnabled(bool on) override
+	{
+		if ( on ) {
+			plot_->getCurve( chnl_ )->setStyle( QwtPlotCurve::CurveStyle::Lines );
+		} else {
+			plot_->getCurve( chnl_ )->setStyle( QwtPlotCurve::CurveStyle::NoCurve );
+		}
+		auto axis = plot_->getAxis( chnl_ );
+		if ( QwtPlot::axisCnt != axis ) {
+			plot_->enableAxis( axis, on );
+		}
+	}
+};
+
+class ChannelEnableChanged {
+public:
+	// channelEnableChanged() returns true if the requested change is acceptable,
+	// false otherwise.
+	virtual bool channelEnableChanged(ChannelCtrl *) = 0;
+	virtual ~ChannelEnableChanged()    = default;
+};
+
+// this doesn't need double-dispatch but we use the Dispatcher for convenience
+
+class ChannelCtrl : public QObject {
+
+	vector<unique_ptr<ChannelObject>> guiElements_;
+	QAction                          *action_ { nullptr };
+	std::list<ChannelEnableChanged*>  subscribers_;
+
+	void addPtr(ChannelObject *p)
+	{
+		unique_ptr<ChannelObject> u( p );
+		guiElements_.push_back( std::move( u ) );
+	}
+
+	bool enabled_ { true };
+	unsigned channel_;
+
+	void onActionTrigger()
+	{
+		if ( action_->isChecked() != enabled() ) {
+			bool ok = true;
+			for ( auto it = subscribers_.begin(); it != subscribers_.end(); ++it ) {
+				ok = ok && (*it)->channelEnableChanged( this );
+			}
+			if ( ok ) {
+				setEnabled( action_->isChecked() );
+			} else {
+				action_->setChecked( enabled() );
+			}
+		}
+	}
+
+public:
+
+	ChannelCtrl(unsigned channel)
+	: channel_( channel )
+	{
+	}
+
+	unsigned getChannel()
+	{
+		return channel_;
+	}
+
+	void subscribe(ChannelEnableChanged *sub)
+	{
+		subscribers_.push_back( sub );
+	}
+
+	void addController( QWidget *w )
+	{
+		addPtr( new ChannelWidget( w, true  ) );
+		
+	}
+
+	void addObserver(QWidget *w)
+	{
+		addPtr( new ChannelWidget( w, false ) );
+	}
+
+	void addCurve( ScopePlot *plot, unsigned channel )
+	{
+		addPtr( new ChannelCurve( plot, channel ) );
+	}
+
+	void setEnabled(bool on)
+	{
+		for ( auto it = guiElements_.begin(); it != guiElements_.end(); ++it ) {
+			(*it)->setEnabled( on );
+		}
+		enabled_ = on;
+	}
+
+	void setAction(QAction *action)
+	{
+		action_ = action;
+		QObject::connect( action_, &QAction::triggered, this, &ChannelCtrl::onActionTrigger );
+	}
+
+	bool enabled() const
+	{
+		return enabled_;
+	}
+};
 
 class SampleMeasurement : public Measurement {
 	Scope *scp_;
@@ -107,6 +256,7 @@ private:
 	vector<QColor>                        vChannelColors_;
 	vector<QString>                       vChannelStyles_;
 	vector<QString>                       vChannelNames_;
+	vector<unique_ptr<ChannelCtrl>>       vChannelCtrl_;
 	vector<string>                        vOvrLEDNames_;
 	vector<QLabel*>                       vMeanLbls_;
 	vector<QLabel*>                       vStdLbls_;
@@ -265,6 +415,14 @@ public:
 		if ( channel < 0 || channel >= vChannelNames_.size() )
 			throw std::invalid_argument( "invalid channel idx" );
 		return &vChannelNames_[channel];
+	}
+
+	ChannelCtrl *
+	getChannelCtrl(int channel)
+	{
+		if ( channel < 0 || channel >= vChannelNames_.size() )
+			throw std::invalid_argument( "invalid channel idx" );
+		return vChannelCtrl_[channel].get();
 	}
 
 	AcqCtrl *
@@ -518,7 +676,7 @@ protected:
 	}
 };
 
-class TrigSrcMenu : public MenuButton {
+class TrigSrcMenu : public MenuButton, public ChannelEnableChanged {
 private:
 	Scope        *scp_;
 	TriggerSource src_;
@@ -562,13 +720,21 @@ public:
 	{
 		// update cached value
 		const QString &s = act->text();
+		TriggerSource newSrc;
 		if ( s == "Channel A" ) {
-			src_ = CHA;
+			newSrc = CHA;
 		} else if ( s == "Channel B" ) {
-			src_ = CHB;
+			newSrc = CHB;
 		} else {
-			src_ = EXT;
+			newSrc = EXT;
 		}
+		if ( newSrc < scp_->numChannels() ) {
+			if ( ! scp_->getChannelCtrl( newSrc )->enabled() ) {
+				scp_->message("Selected trigger channel currently disabled.\nPlease enable first.");
+				return;
+			}
+		}
+		src_ = newSrc;
 		MenuButton::notify( act );
 	}
 
@@ -576,6 +742,18 @@ public:
 	accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );
+	}
+
+	virtual bool
+	channelEnableChanged( ChannelCtrl *ctrl ) override
+	{
+		// if currently enabled and the trigger source then
+		// refuse the imminent disablement
+		if ( ctrl->enabled() && (getSrc() == ctrl->getChannel() ) ) {
+			scp_->message("The channel you want to disable is currently the trigger source.\nPlease switch the trigger source first.");
+			return false;
+		}
+		return true;
 	}
 };
 
@@ -1754,12 +1932,19 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	vChannelColors_.push_back( QColor( Qt::blue  ) );
 	vChannelColors_.push_back( QColor( Qt::black ) );
 
+	// numChannels() is computed from vChannelNames, so that has to
+	// be initialized first.
 	vChannelNames_.push_back( "A" );
 	vChannelNames_.push_back( "B" );
 
 	for ( auto it = vChannelNames_.begin();  it != vChannelNames_.end(); ++it ) {
 		vOvrLEDNames_.push_back( string("OVR") + it->toStdString() );
 		vYScale_.push_back     ( getFullScaleTicks()               );
+	}
+
+	for ( auto ch = 0; ch < numChannels(); ++ch ) {
+		unique_ptr<ChannelCtrl> u( new ChannelCtrl( ch ) );
+		vChannelCtrl_.push_back( std::move( u ) );
 	}
 
 	for ( auto it = vChannelColors_.begin(); it != vChannelColors_.end(); ++it ) {
@@ -1801,6 +1986,9 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	trgSrc_       = new TrigSrcMenu( this );
 	trgSrc_->subscribe( paramUpd_ );
     trgSrc_->subscribe( trigLvl_  );
+	for ( auto it = vChannelCtrl_.begin(); it != vChannelCtrl_.end(); ++it ) {
+		(*it)->subscribe( trgSrc_ );
+	}
 	formLay->addRow( new QLabel( "Trigger Source"    ), trgSrc_ );
 	}
 
@@ -1899,6 +2087,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 			}
 			auto hbx = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
 			for ( auto it  = vInp.begin(); it != vInp.end(); ++it ) {
+			    vChannelCtrl_[ch]->addController( it->get() );
 				hbx->addWidget( it->release() );
 			}
 			formLay->addRow( hbx.release() );
@@ -1933,6 +2122,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 				txt->setStyleSheet( vChannelStyles_[ch] );
 				lbl = std::move( txt );
 			}
+			vChannelCtrl_[ch]->addController( lbl.get() );
+			vChannelCtrl_[ch]->addController( dac.get()->getEditWidget() );
 			formLay->addRow( lbl.release(), dac.release()->getEditWidget() );
 		}
 	}
@@ -2002,6 +2193,14 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	fileMen->addAction( fftDockWid->toggleViewAction() );
 
+	for ( size_t ch = 0; ch < vChannelNames_.size(); ++ch ) {
+		act       = unique_ptr<QAction>( new QAction( QString( "Channel " ) + vChannelNames_[ch] + " Enabled" ) );
+		act->setCheckable( true );
+		act->setChecked( true );
+		vChannelCtrl_[ch]->setAction( act.get() );
+		fileMen->addAction( act.release() );
+	}
+
 	act           = unique_ptr<QAction>( new QAction( "Quit" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quitAndExit );
 	fileMen->addAction( act.release() );
@@ -2066,6 +2265,10 @@ Scope::mkMainPlot()
 	QObject::connect( plot_->lzoom(), qOverload<const QRectF&>(&QwtPlotZoomer::zoomed), axisHScl(),  &ScaleXfrm::setRect );
 	axisHScl()->setRect( plot_->lzoom()->zoomRect() );
 
+	for ( size_t ch = 0; ch < plot_->numCurves(); ++ch ) {
+		vChannelCtrl_[ch]->addCurve( plot_, ch );
+	}
+
 	// markers
 	return plot;
 }
@@ -2073,7 +2276,7 @@ Scope::mkMainPlot()
 unique_ptr<QWidget>
 Scope::mkFFTPlot()
 {
-	secPlot_ = new ScopePlot( &vChannelColors_ );
+	secPlot_ = new FFTPlot( &vChannelColors_ );
 	printf("second plot %p\n", secPlot_);
 
 	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
@@ -2123,6 +2326,9 @@ Scope::mkFFTPlot()
 
 	secPlot_->instantiateMovableMarkers();
 
+	for ( size_t ch = 0; ch < secPlot_->numCurves(); ++ch ) {
+		vChannelCtrl_[ch]->addCurve( secPlot_, ch );
+	}
 
 	horzLay->addLayout( formLay.release() );
 
@@ -2231,6 +2437,8 @@ Scope::mkGainControls( int channel, QColor &color )
 	rv.second = ovr.get();
 
 	sld->subscribe( paramUpd_ );
+
+	vChannelCtrl_[channel]->addController( sld.get() );
 
 	hLay->addWidget( ovr.release() );
 	hLay->addWidget( sld.release() );
@@ -2554,6 +2762,7 @@ Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, Measurem
 			lbl->setDbg( tit->text().toLatin1().data() ); 
 			if ( ch >= 0 ) {
 				lbl->setStyleSheet( vChannelStyles_[ch] );
+				vChannelCtrl_[ch]->addObserver( lbl.get() );
 			}
 			lbl->setAlignment( Qt::AlignRight );
 			lbl->setText( "-000.00MHzx" );
@@ -2746,4 +2955,3 @@ double      scale    = -1.0;
 
 	return app.exec();
 }
-

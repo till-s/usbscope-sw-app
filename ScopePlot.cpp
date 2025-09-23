@@ -94,6 +94,17 @@ ScopePlot::instantiateMovableMarkers()
 	new MovableMarkers( this, picker(), v, this );
 }
 
+QwtPlot::Axis
+ScopePlot::getAxis(unsigned ch)
+{
+	switch ( ch ) {
+		case 0: return QwtPlot::yLeft;
+		case 1: return QwtPlot::yRight;
+		default: break;
+	} 
+	return QwtPlot::axisCnt;
+}
+
 ScopePlot::~ScopePlot()
 {
 }

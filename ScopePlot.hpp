@@ -69,5 +69,22 @@ public:
 		return vPltCurv_[ch];
 	}
 
-	~ScopePlot();
+	// return QwtPlot::axisCnt to mean 'no axis'
+	virtual Axis getAxis(unsigned ch);
+
+	virtual ~ScopePlot();
+};
+
+class FFTPlot : public ScopePlot {
+public:
+	FFTPlot( std::vector<QColor> *colors, QWidget *parent=nullptr )
+	: ScopePlot( colors, parent )
+	{
+	}
+
+	virtual Axis getAxis(unsigned ch) override
+	{
+		// no per-channel axis
+		return QwtPlot::axisCnt;
+	}
 };
