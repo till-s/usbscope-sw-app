@@ -2193,10 +2193,11 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 
 	fileMen->addAction( fftDockWid->toggleViewAction() );
 
-	for ( size_t ch = 0; ch < vChannelNames_.size(); ++ch ) {
+	for ( size_t ch = 0; ch < numChannels(); ++ch ) {
 		act       = unique_ptr<QAction>( new QAction( QString( "Channel " ) + vChannelNames_[ch] + " Enabled" ) );
 		act->setCheckable( true );
 		act->setChecked( true );
+		// action cannot be styled; i.e., we cannot set the channel color
 		vChannelCtrl_[ch]->setAction( act.get() );
 		fileMen->addAction( act.release() );
 	}
