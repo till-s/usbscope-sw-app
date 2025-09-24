@@ -2176,6 +2176,9 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	fftDockWid_  = new QDockWidget( QString("FFT"), mainWin_.get() );
 
 	fftDockWid_->setAllowedAreas( Qt::BottomDockWidgetArea );
+	// Remove the 'movable' feature -- under ubuntu unity undocking the widget by dragging
+	// resulted in it *not* being taken over by the window manager.
+	fftDockWid_->setFeatures( QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetFloatable );
 	mainWin_->addDockWidget( Qt::BottomDockWidgetArea, fftDockWid_ );
 
 	// create FFT plot
