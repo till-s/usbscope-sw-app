@@ -250,6 +250,7 @@ private:
 	constexpr static int                  NUM_CHNLS  = 2;
 	constexpr static int                  NSMPL_DFLT = 2048;
 	unique_ptr<QMainWindow>               mainWin_;
+	QDockWidget                          *fftDockWid_ { nullptr };
 	ScopePlot                            *secPlot_{ nullptr };
 	unsigned                              decimation_;
 	vector<QWidget*>                      vOverRange_;
@@ -554,6 +555,12 @@ public:
 	{
 		quit();
 		exit(0);
+	}
+
+	void
+	redockFFT()
+	{
+		fftDockWid_->setFloating( false );
 	}
 
 	void
@@ -2166,16 +2173,16 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	mainWin_.swap( mainWid );
 
 	// dockable widget for FFT
-	auto fftDockWid  = new QDockWidget( QString("FFT"), mainWin_.get() );
+	fftDockWid_  = new QDockWidget( QString("FFT"), mainWin_.get() );
 
-	fftDockWid->setAllowedAreas( Qt::BottomDockWidgetArea );
-	mainWin_->addDockWidget( Qt::BottomDockWidgetArea, fftDockWid );
+	fftDockWid_->setAllowedAreas( Qt::BottomDockWidgetArea );
+	mainWin_->addDockWidget( Qt::BottomDockWidgetArea, fftDockWid_ );
 
 	// create FFT plot
 	{
 	unique_ptr<QWidget> fftWid( mkFFTPlot());
 
-	fftDockWid->setWidget( fftWid.release() );
+	fftDockWid_->setWidget( fftWid.release() );
 	}
 
 	// menu bar and file menu
@@ -2191,7 +2198,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	fileMen->addAction( act.release() );
 	
 
-	fileMen->addAction( fftDockWid->toggleViewAction() );
+	fileMen->addAction( fftDockWid_->toggleViewAction() );
 
 	for ( size_t ch = 0; ch < numChannels(); ++ch ) {
 		act       = unique_ptr<QAction>( new QAction( QString( "Channel " ) + vChannelNames_[ch] + " Enabled" ) );
@@ -2202,6 +2209,17 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 		fileMen->addAction( act.release() );
 	}
 
+	// this is necessary due to what I believe are bugs in Qt and/or the window system:
+	//   1) when the FFT is undocked by dragging then it is not taken over by the
+	//      window manager but remains stuck on top of the main window and it cannot
+	//      be moved (other have reported this).
+	//   2) when the FFT is undocked by clicking on the small button then it becomes
+	//      a proper top-level window that is managed by the window manager. However,
+	//      it cannot be re-docked by dragging on top of the main window (ubuntu unity).
+	act           = unique_ptr<QAction>( new QAction( "Redock FFT" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::redockFFT );
+	fileMen->addAction( act.release() );
+	
 	act           = unique_ptr<QAction>( new QAction( "Quit" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quitAndExit );
 	fileMen->addAction( act.release() );
