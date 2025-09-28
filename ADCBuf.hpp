@@ -136,7 +136,7 @@ public:
 		if ( ch >= scopeParams_->numChannels ) {
 			abort();
 		}
-		return scopeParams_->afeParams[ch].currentScaleVolts;
+		return scopeParams_->afeParams[ch].currentScaleVolt;
 	}
 
 	TriggerSource

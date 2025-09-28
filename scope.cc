@@ -248,7 +248,7 @@ private:
 	constexpr static int                  CHA_IDX    = 0;
 	constexpr static int                  CHB_IDX    = 1;
 	constexpr static int                  NUM_CHNLS  = 2;
-	constexpr static int                  NSMPL_DFLT = 2048;
+	constexpr static int                  NSMPL_DFLT = 65536;
 	unique_ptr<QMainWindow>               mainWin_;
 	QDockWidget                          *fftDockWid_ { nullptr };
 	ScopePlot                            *secPlot_{ nullptr };
@@ -1371,7 +1371,7 @@ public:
 	virtual double
 	getVal() const override
 	{
-		return scp_->slowDAC()->getVolts( channel_ );
+		return scp_->slowDAC()->getVolt( channel_ );
 	}
 
 	virtual void accept(ValChangedVisitor *v) override
@@ -1720,7 +1720,7 @@ public:
 	virtual void visit(CalDAC *dac) override
 	{
 		auto  p          = scp_->cloneScopeParams();
-		p->afeParams[dac->getChannel()].dacVolts = dac->getDbl();
+		p->afeParams[dac->getChannel()].dacVolt = dac->getDbl();
 		update( p );
 	}
 
@@ -1818,7 +1818,7 @@ public:
 		for ( unsigned ch = 0; ch < desired->numChannels; ++ch ) {
 			bool vScaleChanged = false;
 
-			if ( ! isnan(dval = desired->afeParams[ch].fullScaleVolts) && ( dval!= cur->afeParams[ch].fullScaleVolts ) ) {
+			if ( ! isnan(dval = desired->afeParams[ch].fullScaleVolt) && ( dval!= cur->afeParams[ch].fullScaleVolt ) ) {
 				scp_->Board::setVoltScale(ch, dval);
 				changed       = true;
 				vScaleChanged = true;
@@ -1843,8 +1843,8 @@ public:
 				if ( ! isnan( (v = desired->afeParams[ch].fecAttDb) ) ) {
 					att += v;
 				}
-				double scl = desired->afeParams[ch].fullScaleVolts * exp10(att/20.0);
-				desired->afeParams[ch].currentScaleVolts = scl;
+				double scl = desired->afeParams[ch].fullScaleVolt * exp10(att/20.0);
+				desired->afeParams[ch].currentScaleVolt = scl;
 				scp_->updateVScale( ch, scl );
 			}
 
@@ -1862,8 +1862,8 @@ public:
 				}
 			}
 
-			if ( ! isnan(dval = desired->afeParams[ch].dacVolts) && ( dval != cur->afeParams[ch].dacVolts ) ) {
-				scp_->slowDAC()->setVolts( ch, dval );
+			if ( ! isnan(dval = desired->afeParams[ch].dacVolt) && ( dval != cur->afeParams[ch].dacVolt ) ) {
+				scp_->slowDAC()->setVolt( ch, dval );
 				changed = true;
 			}
 
@@ -2181,15 +2181,17 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	fftDockWid_->setFeatures( QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetFloatable );
 	mainWin_->addDockWidget( Qt::BottomDockWidgetArea, fftDockWid_ );
 
-	// create FFT plot
+	// Create FFT plot
 	{
 	unique_ptr<QWidget> fftWid( mkFFTPlot());
 
 	fftDockWid_->setWidget( fftWid.release() );
 	}
 
-	// menu bar and file menu
+	// Menu bar
 	auto menuBar  = unique_ptr<QMenuBar>( new QMenuBar() );
+
+	// File menu
 	auto fileMen  = menuBar->addMenu( "File" );
 
 	auto act      = unique_ptr<QAction>( new QAction( "Save Waveform To" ) );
@@ -2200,8 +2202,12 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::editComment );
 	fileMen->addAction( act.release() );
 	
+	act           = unique_ptr<QAction>( new QAction( "Quit" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quitAndExit );
+	fileMen->addAction( act.release() );
 
-	fileMen->addAction( fftDockWid_->toggleViewAction() );
+	// View menu
+	auto viewMen  = menuBar->addMenu( "View" );
 
 	for ( size_t ch = 0; ch < numChannels(); ++ch ) {
 		act       = unique_ptr<QAction>( new QAction( QString( "Channel " ) + vChannelNames_[ch] + " Enabled" ) );
@@ -2209,8 +2215,10 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 		act->setChecked( true );
 		// action cannot be styled; i.e., we cannot set the channel color
 		vChannelCtrl_[ch]->setAction( act.get() );
-		fileMen->addAction( act.release() );
+		viewMen->addAction( act.release() );
 	}
+
+	viewMen->addAction( fftDockWid_->toggleViewAction() );
 
 	// this is necessary due to what I believe are bugs in Qt and/or the window system:
 	//   1) when the FFT is undocked by dragging then it is not taken over by the
@@ -2221,12 +2229,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	//      it cannot be re-docked by dragging on top of the main window (ubuntu unity).
 	act           = unique_ptr<QAction>( new QAction( "Redock FFT" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::redockFFT );
-	fileMen->addAction( act.release() );
+	viewMen->addAction( act.release() );
 	
-	act           = unique_ptr<QAction>( new QAction( "Quit" ) );
-	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quitAndExit );
-	fileMen->addAction( act.release() );
-
 	mainWin_->setMenuBar( menuBar.release() );
 
 
@@ -2304,13 +2308,13 @@ Scope::mkFFTPlot()
 	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
 	horzLay->addWidget( secPlot_, 8 );
 
-	secPlot_->setAxisTitle( QwtPlot::yLeft, "dBFS" );
+	secPlot_->setAxisTitle( QwtPlot::yLeft, "dBfs" );
 	// one-sided spectrum; multiply half of two-sided spectrum
 	// by sqrt(2) (so that Energy remains the same).
     // (= divide scale by sqrt(2)).
 	// The value at f=0 has been adjusted in computeAbsFFT().
 	double dbOff = -20.0*log10(0.5*getFullScaleTicks()*getNSamples());
-	auto xfrm = new ScaleXfrm( true, "dB", this, secPlot_ );
+	auto xfrm = new ScaleXfrm( true, "dBfs", this, secPlot_ );
 	xfrm->setScale( 20.0 );
 	xfrm->setOffset( dbOff );
 	xfrm->setUseNormalizedScale( false );
@@ -2432,7 +2436,7 @@ Scope::setVoltScale(int channel, double voltScale) {
 	if ( channel >= newParams->numChannels ) {
 		throw std::invalid_argument("invalid channel index");
 	}
-	newParams->afeParams[channel].fullScaleVolts = voltScale;
+	newParams->afeParams[channel].fullScaleVolt = voltScale;
 	paramUpd_->update( newParams );
 }
 
@@ -2673,7 +2677,7 @@ Scope::getTriggerOffset(BufPtr buf)
 void
 Scope::updateVScale(int ch)
 {
-	updateVScale(ch, currentParams()->afeParams[ch].currentScaleVolts);
+	updateVScale(ch, currentParams()->afeParams[ch].currentScaleVolt);
 }
 
 void
@@ -2884,10 +2888,10 @@ FFTMeasurement::getRawData(unsigned ch, int idx)
 static void
 usage(const char *nm)
 {
-	printf("usage: %s [-hsr] [-d <tty_device>] [-n <num_samples>] [-p <hdf5_path>] [-S <full_scale_volts>]\n", nm);
+	printf("usage: %s [-hsr] [-d <tty_device>] [-n <num_samples>] [-p <hdf5_path>] [-S <full_scale_volt>]\n", nm);
 	printf("  -h                  : Print this message.\n");
     printf("  -d tty_device       : Path to TTY device (defaults to '/dev/ttyACM0').\n");
-	printf("  -S full_scale_volts : Change scale to 'full_scale_volts' (at 0dB\n");
+	printf("  -S full_scale_volt  : Change scale to 'full_scale_volt' (at 0dB\n");
 	printf("                        attenuation).\n");
 	printf("  -n num_samples      : Set number of samples to use (defaults to zero\n");
 	printf("                        which lets the app pick a default).\n");
