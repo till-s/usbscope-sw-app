@@ -63,6 +63,7 @@ using std::string;
 
 class Scope;
 class TrigArmMenu;
+enum class TrigArmState : int { OFF = 0, SINGLE = 1, CONTINUOUS = 2 };
 class TrigSrcMenu;
 class TrigLevel;
 class ParamUpdateVisitor;
@@ -516,9 +517,10 @@ public:
 	}
 
 	void
-	postTrgMode(const QString &mode)
+	postTrgMode(TrigArmState mode)
 	{
-		if ( mode == "Single" ) {
+		
+		if ( TrigArmState::SINGLE == mode ) {
 			// increment the sync value
 			postSync();
 		}
@@ -996,11 +998,9 @@ public:
 };
 
 class TrigArmMenu : public MenuButton {
-public:
-	enum State { OFF, SINGLE, CONTINUOUS };
 private:
-	Scope *scp_;
-	State  state_;
+	Scope        *scp_;
+	TrigArmState  state_;
 
 	static vector<QString>
 	mkStrings(Scope *scp)
@@ -1016,13 +1016,14 @@ private:
 public:
 	TrigArmMenu(Scope *scp, QWidget *parent = nullptr)
 	: MenuButton( mkStrings( scp ), parent ),
-	  scp_(scp)
+	  scp_   ( scp                  ),
+	  state_ ( fromString( text() ) )
 	{
 		scp_->clrTrgLED();
-		scp_->postTrgMode( text() );
+		scp_->postTrgMode( state_ );
 	}
 
-	virtual State
+	virtual TrigArmState
 	getState()
 	{
 		return state_;
@@ -1034,31 +1035,37 @@ public:
 		v->visit( this );
 	}
 
+	static TrigArmState
+	fromString(const QString &str)
+	{
+		if ( str == "Continuous" ) {
+			return TrigArmState::CONTINUOUS;
+		} else if ( str == "Single" ) {
+			return TrigArmState::SINGLE;
+		} else {
+			return TrigArmState::OFF;
+		}
+	}
+
 	virtual void
 	notify(TxtAction *act) override
 	{
-		if ( act->text() == "Continuous" ) {
-			state_ = CONTINUOUS;
-		} else if ( act->text() == "Single" ) {
-			state_ = SINGLE;
-		} else {
-			state_ = OFF;
-		}
-		if ( state_ != OFF ) {
+		state_ = fromString( act->text() );
+		if ( state_ != TrigArmState::OFF ) {
 			scp_->clf();
 		}
 		MenuButton::notify( act );
 	}
 
 	virtual void
-	update(State newState)
+	update(TrigArmState newState)
 	{
 		if ( newState != state_ ) {
 			state_ = newState;
 			switch ( state_ ) {
-				case CONTINUOUS: setText("Continuous"); break;
-				case SINGLE    : setText("Single");     break;
-				case OFF       : setText("Off");        break;
+				case TrigArmState::CONTINUOUS: setText("Continuous"); break;
+				case TrigArmState::SINGLE    : setText("Single");     break;
+				case TrigArmState::OFF       : setText("Off");        break;
 			}
 			valChanged();
 		}
@@ -1667,8 +1674,10 @@ public:
 
 	virtual void visit( TrigArmMenu *mnu ) override
 	{
+		auto  p          = scp_->cloneScopeParams();
 		scp_->clrTrgLED();
-		scp_->postTrgMode( mnu->text() );
+		p->trigMode      = static_cast<int>( mnu->getState() );
+		update( p );
 	}
 
 	virtual void visit(AttenuatorSlider *sl) override
@@ -1757,7 +1766,8 @@ public:
 		update( p );
 	}
 
-	virtual void update(ScopeParamsPtr desired) {
+	virtual void update( ScopeParamsPtr desired )
+	{
 		bool   changed = false;
 		auto   cur     = scp_->currentParams();
 		double dval;
@@ -1771,6 +1781,10 @@ public:
 				desired->acqParams.trigOutEn = 0;
 
 			}
+			changed = true;
+		}
+
+		if ( desired->trigMode != cur->trigMode ) {
 			changed = true;
 		}
 
@@ -2489,13 +2503,13 @@ Scope::newData(BufPtr buf)
 		return;
 	}
 
-	if ( TrigArmMenu::OFF == trgArm_->getState() ) {
+	if ( TrigArmState::OFF == trgArm_->getState() ) {
 		return;
 	}
 
-	if ( TrigArmMenu::SINGLE == trgArm_->getState() && ( buf->getSync() != lsync_ ) ) {
+	if ( TrigArmState::SINGLE == trgArm_->getState() && ( buf->getSync() != lsync_ ) ) {
 		// single-trigger event received
-		trgArm_->update( TrigArmMenu::OFF );
+		trgArm_->update( TrigArmState::OFF );
 	}
 
 	unsigned hdr = buf->getHdr();
@@ -2853,7 +2867,7 @@ Scope::handleKeyPress( int key )
 			clf();
 			break;
 		case Qt::Key_S:
-			trgArm_->update( TrigArmMenu::SINGLE );
+			trgArm_->update( TrigArmState::SINGLE );
 			break;
 		default:
 			break;
