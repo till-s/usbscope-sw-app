@@ -371,7 +371,7 @@ public:
 	void
 	postTrgMode(TrigArmState mode)
 	{
-		
+
 		if ( TrigArmState::SINGLE == mode ) {
 			// increment the sync value
 			postSync();
@@ -1629,7 +1629,7 @@ public:
 		    || ( desired->acqParams.rising != cur->acqParams.rising ) ) {
 			scp_->acq()->setTriggerSrc( desired->acqParams.src, desired->acqParams.rising );
 			if ( EXT == desired->acqParams.src ) {
-				// fw switched trigOut off automatically 
+				// fw switched trigOut off automatically
 				desired->acqParams.trigOutEn = 0;
 
 			}
@@ -2067,7 +2067,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	act           = unique_ptr<QAction>( new QAction( "Comment and Save Waveform To" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::editComment );
 	fileMen->addAction( act.release() );
-	
+
 	act           = unique_ptr<QAction>( new QAction( "Quit" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quitAndExit );
 	fileMen->addAction( act.release() );
@@ -2096,7 +2096,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	act           = unique_ptr<QAction>( new QAction( "Redock FFT" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::redockFFT );
 	viewMen->addAction( act.release() );
-	
+
 	mainWin_->setMenuBar( menuBar.release() );
 
 
@@ -2651,7 +2651,7 @@ Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, Measurem
 		if ( -1 != ch || md || msr ) {
 			// ch == -1 creates a deltaX/X label when dealing with a MeasDiff or MeasMarker
 			auto lbl   = unique_ptr<MeasLbl>( new MeasLbl( ch ) );
-			lbl->setDbg( tit->text().toLatin1().data() ); 
+			lbl->setDbg( tit->text().toLatin1().data() );
 			if ( ch >= 0 ) {
 				lbl->setStyleSheet( vChannelStyles_[ch] );
 				vChannelCtrl_[ch]->addObserver( lbl.get() );
@@ -2672,7 +2672,7 @@ Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, Measurem
 	}
 }
 
-	
+
 void
 Scope::addMeasPair( QGridLayout *grid, ScopePlot *plot, Measurement* (*measFactory)( Scope * ) )
 {
@@ -2735,7 +2735,7 @@ SampleMeasurement::SampleMeasurement( Scope *scp )
 double
 SampleMeasurement::getRawData(unsigned ch, int idx)
 {
-	return scp_->getRawSample( ch, idx );	
+	return scp_->getRawSample( ch, idx );
 }
 
 FFTMeasurement::FFTMeasurement( Scope *scp )
@@ -2747,7 +2747,7 @@ FFTMeasurement::FFTMeasurement( Scope *scp )
 double
 FFTMeasurement::getRawData(unsigned ch, int idx)
 {
-	return scp_->getRawFFTSample( ch, idx );	
+	return scp_->getRawFFTSample( ch, idx );
 }
 
 
@@ -2792,7 +2792,7 @@ double      scale    = -1.0;
 	// Creating the QApplication produces this error message:
 	//
 	//   QSocketNotifier: Can only be used with threads started with QThread
-	// 
+	//
 	QApplication app(argc, argv);
 
 	while ( (opt = getopt( argc, argv, "d:hn:p:rsS:" )) > 0 ) {
