@@ -29,6 +29,7 @@ set(SRCS
 	"Measurement.cpp"
 	"IntrusiveSharedPointer/IntrusiveShpFreeList.cpp"
 	"ScopeParams.cpp"
+	"ChannelObject.cpp"
 )
 
 set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)
