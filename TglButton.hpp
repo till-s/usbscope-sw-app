@@ -7,7 +7,7 @@
 
 #include <Dispatcher.hpp>
 
-class TglButton : public QPushButton, public ValUpdater {
+class TglButton : public QPushButton, public virtual ValUpdater {
 protected:
 	std::vector<QString>    lbls_;
 	int                     chnl_;

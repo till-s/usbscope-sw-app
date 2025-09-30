@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.20)
 
 project(scope LANGUAGES CXX)
 
@@ -10,6 +10,7 @@ add_subdirectory(usbadc-support/sw)
 add_subdirectory(fwcommCPP)
 
 find_library(QWT NAMES qwt qwt6 qwt-qt5 fftw3)
+find_library(JANSSON NAMES jansson)
 
 set(AUTOMOC ON)
 
@@ -30,11 +31,15 @@ set(SRCS
 	"IntrusiveSharedPointer/IntrusiveShpFreeList.cpp"
 	"ScopeParams.cpp"
 	"ChannelObject.cpp"
+	"Dispatcher.cpp"
 )
 
 set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)
 if (HDF5_FOUND)
 	list(APPEND LIBS ${HDF5_LIBRARIES})
+endif()
+if (JANSSON_FOUND)
+	list(APPEND LIBS ${JANSSON_LIBRARIES})
 endif()
 
 include_directories(./ IntrusiveSharedPointer fwcommCPP usbadc-support/sw /usr/include/qwt)

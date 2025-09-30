@@ -38,6 +38,8 @@
 #include <Board.hpp>
 #include <H5Smpl.hpp>
 
+#include <jsonSup.h>
+
 #include <DataReadyEvent.hpp>
 #include <ScopeReader.hpp>
 #include <Scope.hpp>
@@ -138,6 +140,7 @@ private:
 	string                                saveToDir_ {"."};
 	QString                               comment_;
 	ScopeParamsPool                       paramsPool_;
+	string                                paramsFileName_;
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
@@ -150,7 +153,7 @@ private:
 
 public:
 
-	Scope(FWPtr fw, bool sim=false, unsigned nsamples = 0, QObject *parent = nullptr);
+	Scope(FWPtr fw, bool sim=false, unsigned nsamples = 0, const char *jsonFnam = nullptr, QObject *parent = nullptr);
 	~Scope();
 
 	unique_ptr<ScopePlot>
@@ -490,6 +493,26 @@ public:
 		}
 	}
 
+	void
+	saveSettings()
+	{
+		const char *proposal = paramsFileName_.empty() ? "." : paramsFileName_.c_str();
+		string fileName = QFileDialog::getSaveFileName( mainWin_.get(), "Save Settings", proposal, "(*.json)" ).toStdString();
+		if ( fileName.empty() ) {
+			return;
+		}
+		auto params = currentParams();
+		if ( int st = scope_json_save( (*this)->scope(), fileName.c_str(), params.get() ) ) {
+			message( QString("Saving settings failed: ") + strerror(-st) );
+			return;
+		}
+
+		paramsFileName_ = fileName;
+	}
+
+	void
+	loadSettings();
+
 	virtual bool
 	event(QEvent *ev) override;
 
@@ -537,7 +560,7 @@ protected:
 	}
 };
 
-class TrigSrcMenu : public MenuButton, public ChannelEnableChanged {
+class TrigSrcMenu : public ParamMenuButton, public ChannelEnableChanged {
 private:
 	Scope        *scp_;
 	TriggerSource src_;
@@ -545,19 +568,7 @@ private:
 	vector<QString>
 	mkStrings(Scope *scp)
 	{
-		scp->acq()->getTriggerSrc( &src_, nullptr );
 		vector<QString> rv;
-		switch ( src_ ) {
-			case CHA:
-				rv.push_back( "Channel A" );
-				break;
-			case CHB:
-				rv.push_back( "Channel B" );
-				break;
-			default:
-				rv.push_back( "External" );
-				break;
-		}
 		rv.push_back( "Channel A" );
 		rv.push_back( "Channel B" );
 		rv.push_back( "External"  );
@@ -566,13 +577,26 @@ private:
 
 public:
 	TrigSrcMenu(Scope *scp, QWidget *parent = nullptr)
-	: MenuButton( mkStrings( scp ), parent ),
+	: ParamMenuButton( mkStrings( scp ), parent ),
 	  scp_(scp)
 	{
+		updateGUI();
+	}
+
+	virtual void updateGUI() override
+	{
+		scp_->acq()->getTriggerSrc( &src_, nullptr );
+		unsigned sel = numMenuEntries() - 1;
+		printf("src %d, sel %d\n", src_, sel);
+		if ( src_ < sel ) {
+			sel = src_;
+		}
+		setMenuEntry( sel );
 	}
 
 	virtual TriggerSource
-	getSrc() {
+	getSrc()
+	{
 		return src_;
 	}
 
@@ -596,7 +620,7 @@ public:
 			}
 		}
 		src_ = newSrc;
-		MenuButton::notify( act );
+		ParamMenuButton::notify( act );
 	}
 
 	virtual void
@@ -618,7 +642,7 @@ public:
 	}
 };
 
-class ScopeTglButton : public TglButton {
+class ScopeTglButton : public TglButton, public ParamValUpdater {
 protected:
 	Scope *scp_;
 public:
@@ -626,6 +650,11 @@ public:
 	: TglButton( lbls, channel, parent ),
 	  scp_ ( scp )
 	{
+	}
+
+	virtual void updateGUI() override
+	{
+		setLbl( getVal() );
 	}
 };
 
@@ -641,10 +670,10 @@ public:
 	DACRangeTgl( Scope *scp, int channel, QWidget *parent = nullptr )
 	: ScopeTglButton( scp, labels( scp, channel ), channel, parent )
 	{
-		if ( 0 &&  scp_->currentParams()->afeParams[this->channel()].dacRangeHi < 0 ) {
-			throw std::runtime_error("No CAC range controls");
+		if ( scp_->currentParams()->afeParams[this->channel()].dacRangeHi < 0 ) {
+			throw std::runtime_error("No DAC range controls");
 		}
-		setLbl( getVal() );
+		updateGUI();
 	}
 
 	virtual void accept(ValChangedVisitor *v) override
@@ -666,6 +695,11 @@ public:
 	FECTerminationTgl( Scope *scp, int channel, QWidget * parent = nullptr )
 	: ScopeTglButton( scp, vector<QString>( {"50Ohm", "1MOhm" } ), channel, parent ),
 	  ledName_( std::string("Term") + scp->getChannelName( channel )->toStdString() )
+	{
+		updateGUI();
+	}
+
+	virtual void updateGUI() override
 	{
 		bool v = getVal();
 		setLbl( v );
@@ -700,7 +734,7 @@ public:
 		if ( scp_->currentParams()->afeParams[this->channel()].fecCouplingAC < 0 ) {
 			throw std::runtime_error("No AC coupling controls");
 		}
-		setLbl( getVal() );
+		updateGUI();
 	}
 
 	virtual void accept(ValChangedVisitor *v) override
@@ -731,7 +765,7 @@ public:
 	FECAttenuatorTgl( Scope *scp, int channel, QWidget * parent = nullptr )
 	: ScopeTglButton( scp, labels(scp), channel, parent )
 	{
-		setLbl( getVal() );
+		updateGUI();
 	}
 
 	virtual void accept(ValChangedVisitor *v) override
@@ -751,7 +785,7 @@ public:
 	ExtTrigOutEnTgl( Scope *scp, QWidget * parent = nullptr )
 	: ScopeTglButton( scp, vector<QString>( {"Output", "Input" } ), 0, parent )
 	{
-		setLbl( getVal() );
+		updateGUI();
 	}
 
 	virtual void visit(TrigSrcMenu *trgSrc)
@@ -781,21 +815,14 @@ public:
 	}
 };
 
-class TrigEdgMenu : public MenuButton {
+class TrigEdgMenu : public ParamMenuButton {
 private:
 	Scope *scp_;
 
 	static vector<QString>
 	mkStrings(Scope *scp)
 	{
-		bool rising;
-		scp->acq()->getTriggerSrc( nullptr, &rising );
 		vector<QString> rv;
-		if ( rising ) {
-			rv.push_back( "Rising"  );
-		} else {
-			rv.push_back( "Falling" );
-		}
 		rv.push_back( "Rising"  );
 		rv.push_back( "Falling" );
 		return rv;
@@ -803,9 +830,17 @@ private:
 
 public:
 	TrigEdgMenu(Scope *scp, QWidget *parent = nullptr)
-	: MenuButton( mkStrings( scp ), parent ),
+	: ParamMenuButton( mkStrings( scp ), parent ),
 	  scp_(scp)
 	{
+		updateGUI();
+	}
+
+	virtual void updateGUI() override
+	{
+		bool rising;
+		scp_->acq()->getTriggerSrc( nullptr, &rising );
+		setMenuEntry( rising ? 0 : 1 );
 	}
 
 	virtual void
@@ -816,20 +851,14 @@ public:
 };
 
 
-class TrigAutMenu : public MenuButton {
+class TrigAutMenu : public ParamMenuButton {
 private:
+	Scope *scp_;
 
 	static vector<QString>
 	mkStrings(Scope *scp)
 	{
-		int ms = scp->acq()->getAutoTimeoutMS();
-
 		vector<QString> rv;
-		if ( ms >= 0 ) {
-			rv.push_back( "On"  );
-		} else {
-			rv.push_back( "Off" );
-		}
 		rv.push_back( "On"  );
 		rv.push_back( "Off" );
 		return rv;
@@ -837,8 +866,16 @@ private:
 
 public:
 	TrigAutMenu(Scope *scp, QWidget *parent = nullptr)
-	: MenuButton( mkStrings( scp ), parent )
+	: ParamMenuButton( mkStrings( scp ), parent ),
+	  scp_ ( scp )
 	{
+		updateGUI();
+	}
+
+	virtual void updateGUI() override
+	{
+		int ms = scp_->acq()->getAutoTimeoutMS();
+		setMenuEntry( ms >= 0 ? 0 : 1 );
 	}
 
 	virtual void
@@ -849,7 +886,7 @@ public:
 
 };
 
-class TrigArmMenu : public MenuButton {
+class TrigArmMenu : public ParamMenuButton {
 private:
 	Scope        *scp_;
 	TrigArmState  state_;
@@ -858,7 +895,6 @@ private:
 	mkStrings(Scope *scp)
 	{
 		vector<QString> rv;
-		rv.push_back( "Continuous"  );
 		rv.push_back( "Off" );
 		rv.push_back( "Single"  );
 		rv.push_back( "Continuous"  );
@@ -867,12 +903,28 @@ private:
 
 public:
 	TrigArmMenu(Scope *scp, QWidget *parent = nullptr)
-	: MenuButton( mkStrings( scp ), parent ),
-	  scp_   ( scp                  ),
-	  state_ ( fromString( text() ) )
+	: ParamMenuButton( mkStrings( scp ), parent ),
+	  scp_           ( scp                      )
 	{
+		updateGUI();
 		scp_->clrTrgLED();
 		scp_->postTrgMode( state_ );
+	}
+
+	virtual void updateGUI() override
+	{
+		switch ( scp_->currentParams()->trigMode ) {
+			case static_cast<int>( TrigArmState::CONTINUOUS ):
+				state_ = TrigArmState::CONTINUOUS;
+			break;
+			case static_cast<int>( TrigArmState::SINGLE     ):
+				state_ = TrigArmState::SINGLE;
+			break;
+			default:
+				state_ = TrigArmState::OFF;
+			break;
+		}
+		setMenuEntry( static_cast<unsigned>( state_ ) );
 	}
 
 	virtual TrigArmState
@@ -906,7 +958,7 @@ public:
 		if ( state_ != TrigArmState::OFF ) {
 			scp_->clf();
 		}
-		MenuButton::notify( act );
+		ParamMenuButton::notify( act );
 	}
 
 	virtual void
@@ -924,7 +976,7 @@ public:
 	}
 };
 
-class TrigLevel : public ParamValidator, public MovableMarker, public ValUpdater, public ValChangedVisitor {
+class TrigLevel : public ParamValidator, public MovableMarker, public ParamValUpdater, public ValChangedVisitor {
 private:
 	Scope         *scp_;
 	double         lvl_;
@@ -937,9 +989,14 @@ public:
 	TrigLevel( QLineEdit *edt, Scope *scp )
 	: ParamValidator( edt, new QDoubleValidator(-100.0,100.0,3) ),
 	  MovableMarker(       ),
-	scp_         ( scp   )
+	scp_           ( scp   )
 	{
 		setLineStyle( QwtPlotMarker::HLine );
+		updateGUI();
+	}
+
+	virtual void updateGUI() override
+	{
 		scp_->acq()->getTriggerSrc( &src_, nullptr );
 		lvl_ = scp_->acq()->getTriggerLevelPercent();
 		// hold un-normalized volts
@@ -1190,6 +1247,11 @@ public:
 	: IntParamValidator( edt, 1, 16*(1<<12) ),
 	  scp_( scp )
 	{
+		updateGUI();
+	}
+
+	virtual void updateGUI() override
+	{
 		val_ = getVal();
 		getAction();
 	}
@@ -1216,6 +1278,12 @@ public:
 	: DblParamValidator( edt, -1.0, 1.0 ),
 	  channel_         ( channel        ),
 	  scp_             ( scp            )
+	{
+		updateGUI();
+	}
+
+	virtual void
+	updateGUI() override
 	{
 		val_ = getVal();
 		getAction();
@@ -1251,6 +1319,11 @@ public:
       scp_             ( scp                            )
 	{
 		setLineStyle( QwtPlotMarker::VLine );
+		updateGUI();
+	}
+
+	virtual void updateGUI() override
+	{
 		npts_ = scp_->acq()->getNPreTriggerSamples();
 		visit( scp_->axisHScl() );
 	}
@@ -1366,7 +1439,7 @@ public:
 	}
 };
 
-class LabeledSlider : public QSlider, public ValUpdater {
+class LabeledSlider : public QSlider, public ParamValUpdater {
 protected:
 	QLabel  *lbl_;
 	QString  unit_;
@@ -1389,17 +1462,24 @@ public:
 
 class AttenuatorSlider : public LabeledSlider {
 private:
-	int channel_;
+	int    channel_;
+	Scope *scp_;
 public:
 	AttenuatorSlider( Scope *scp, int channel, QLabel *lbl, Qt::Orientation orient, QWidget *parent = nullptr )
 	: LabeledSlider( lbl, "dB", orient, parent ),
-	  channel_( channel )
+	  channel_( channel ),
+	  scp_    ( scp     )
 	{
 		int  min, max;
-		scp->pga()->getDBRange( &min, &max );
+		scp_->pga()->getDBRange( &min, &max );
 		setMinimum( min );
 		setMaximum( max );
-		int att = roundf( scp->pga()->getDBAtt( channel_ ) );
+		updateGUI();
+	}
+
+	virtual void updateGUI() override
+	{
+		int att = roundf( scp_->pga()->getDBAtt( channel_ ) );
 		update( att );
 		setValue( att );
 	}
@@ -1492,7 +1572,7 @@ ScaleXfrm::smlfmt_ = vector<const char *>({
 	});
 
 // Visitor to forward GUI settings to the device
-class ParamUpdateVisitor : public ValChangedVisitor {
+class ParamUpdateVisitor : public ParamChangedVisitor {
 	Scope *scp_;
 public:
 	ParamUpdateVisitor(Scope *scp)
@@ -1503,23 +1583,26 @@ public:
 	virtual void visit( TrigSrcMenu *mnu ) override
 	{
 		auto p = scp_->cloneScopeParams();
-		p->acqParams.src = mnu->getSrc();
+		p->acqParams.src   = mnu->getSrc();
+		p->acqParams.mask |= ACQ_PARAM_MSK_SRC;
 		update( p );
 	}
 
 	virtual void visit( TrigEdgMenu *mnu ) override
 	{
-		auto  p          = scp_->cloneScopeParams();
-		const QString &s = mnu->text();
+		auto  p             = scp_->cloneScopeParams();
+		const QString &s    = mnu->text();
 		p->acqParams.rising = (s == "Rising");
+		p->acqParams.mask  |= ACQ_PARAM_MSK_EDG;
 		update( p );
 	}
 
 	virtual void visit( TrigAutMenu *mnu ) override
 	{
-		auto  p          = scp_->cloneScopeParams();
-		const QString &s = mnu->text();
-		int            ms = (s == "On") ? 100 : -1;
+		auto  p                    = scp_->cloneScopeParams();
+		const QString &s           = mnu->text();
+		int            ms          = (s == "On") ? 100 : -1;
+		p->acqParams.mask         |= ACQ_PARAM_MSK_AUT;
 		p->acqParams.autoTimeoutMS = ms;
 		update( p );
 	}
@@ -1534,7 +1617,7 @@ public:
 
 	virtual void visit(AttenuatorSlider *sl) override
 	{
-		auto  p          = scp_->cloneScopeParams();
+		auto  p                              = scp_->cloneScopeParams();
 		p->afeParams[sl->channel()].pgaAttDb = sl->value();
 		update( p );
 	}
@@ -1575,6 +1658,7 @@ public:
 	{
 		auto  p            = scp_->cloneScopeParams();
 		p->acqParams.level = acq_percent_to_level( lvl->levelPercent() );
+		p->acqParams.mask |= ACQ_PARAM_MSK_LVL;
 		update( p );
 	}
 
@@ -1595,14 +1679,16 @@ public:
 		} else {
 			auto  p          = scp_->cloneScopeParams();
 			p->acqParams.trigOutEn = ( tgl->isChecked() ? 1 : 0 );
+		    p->acqParams.mask     |= ACQ_PARAM_MSK_TGO;
 			update( p );
 		}
 	}
 
 	virtual void visit(NPreTriggerSamples *npts) override
 	{
-		auto  p           = scp_->cloneScopeParams();
-		p->acqParams.npts = npts->getNPTS();
+		auto  p            = scp_->cloneScopeParams();
+		p->acqParams.npts  = npts->getNPTS();
+		p->acqParams.mask |= ACQ_PARAM_MSK_NPT;
 		update( p );
 	}
 
@@ -1615,6 +1701,7 @@ public:
 		scp_->acq()->computeCICDecimation( decm->getInt(), &d0, &d1 );
 		p->acqParams.cic0Decimation = d0;
 		p->acqParams.cic1Decimation = d1;
+		p->acqParams.mask          |= ACQ_PARAM_MSK_DCM;
 		update( p );
 	}
 
@@ -1624,6 +1711,45 @@ public:
 		auto   cur     = scp_->currentParams();
 		double dval;
 		int    ival;
+
+		if ( ! (desired->acqParams.mask & ACQ_PARAM_MSK_SRC) ) {
+			desired->acqParams.src   = cur->acqParams.src;
+			desired->acqParams.mask |= ACQ_PARAM_MSK_SRC;
+		}
+		if ( ! (desired->acqParams.mask & ACQ_PARAM_MSK_EDG) ) {
+			desired->acqParams.rising   = cur->acqParams.rising;
+			desired->acqParams.mask    |= ACQ_PARAM_MSK_EDG;
+		}
+		if ( ! (desired->acqParams.mask & ACQ_PARAM_MSK_AUT) ) {
+			desired->acqParams.autoTimeoutMS  = cur->acqParams.autoTimeoutMS;
+			desired->acqParams.mask          |= ACQ_PARAM_MSK_AUT;
+		}
+		if ( ! (desired->acqParams.mask & ACQ_PARAM_MSK_LVL) ) {
+			desired->acqParams.level          = cur->acqParams.level;
+			desired->acqParams.hysteresis     = cur->acqParams.hysteresis;
+			desired->acqParams.mask          |= ACQ_PARAM_MSK_LVL;
+		}
+		if ( ! (desired->acqParams.mask & ACQ_PARAM_MSK_NPT) ) {
+			desired->acqParams.npts           = cur->acqParams.npts;
+			desired->acqParams.mask          |= ACQ_PARAM_MSK_NPT;
+		}
+		if ( ! (desired->acqParams.mask & ACQ_PARAM_MSK_DCM) ) {
+			desired->acqParams.cic0Decimation = cur->acqParams.cic0Decimation;
+			desired->acqParams.cic1Decimation = cur->acqParams.cic1Decimation;
+			desired->acqParams.mask          |= ACQ_PARAM_MSK_DCM;
+		}
+		if ( ! (desired->acqParams.mask & ACQ_PARAM_MSK_TGO) ) {
+			desired->acqParams.trigOutEn  = cur->acqParams.trigOutEn;
+			desired->acqParams.mask      |= ACQ_PARAM_MSK_TGO;
+		}
+
+		/* run-time changes to nsamples and filter scale are not supported; filter
+		 * scale is set automatically if mask is unset
+		 */
+		desired->acqParams.mask    |= ACQ_PARAM_MSK_NSM;
+		desired->acqParams.nsamples = cur->acqParams.nsamples;
+		desired->acqParams.mask    &= ~ACQ_PARAM_MSK_SCL;
+
 
 		if (   ( desired->acqParams.src    != cur->acqParams.src    )
 		    || ( desired->acqParams.rising != cur->acqParams.rising ) ) {
@@ -1649,10 +1775,12 @@ public:
 			}
 		}
 
+
 		if ( ! isnan(dval = desired->acqParams.autoTimeoutMS) && ( dval != cur->acqParams.autoTimeoutMS ) ) {
 			scp_->acq()->setAutoTimeoutMS( dval );
 			changed = true;
 		}
+
 
 		if ( desired->acqParams.level != cur->acqParams.level ) {
 			scp_->acq()->setTriggerLevelPercent( acq_level_to_percent( desired->acqParams.level ) );
@@ -1748,37 +1876,66 @@ public:
 };
 
 
-Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
-: QObject        ( parent    ),
-  Board          ( fw, sim   ),
-  plotScales_    ( NUM_CHNLS ),
-  fftScales_     ( NUM_CHNLS ),
-  reader_        ( nullptr   ),
-  xRange_        ( nullptr   ),
-  fRange_        ( nullptr   ),
-  nsmpl_         ( nsamples  ),
+Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObject *parent)
+: QObject        ( parent        ),
+  Board          ( fw, sim       ),
+  plotScales_    ( NUM_CHNLS     ),
+  fftScales_     ( NUM_CHNLS     ),
+  reader_        ( nullptr       ),
+  xRange_        ( nullptr       ),
+  fRange_        ( nullptr       ),
+  nsmpl_         ( NSMPL_DFLT    ),
   pipe_          ( ScopeReaderCmdPipe::create() ),
-  trgArm_        ( nullptr   ),
-  single_        ( false     ),
-  lsync_         ( 0         ),
-  paramUpd_      ( nullptr   ),
-  paramsPool_    ( this      )
+  trgArm_        ( nullptr       ),
+  single_        ( false         ),
+  lsync_         ( 0             ),
+  paramUpd_      ( nullptr       ),
+  paramsPool_    ( this          )
 {
-	if ( 0 == nsmpl_ ) {
-		nsmpl_ = NSMPL_DFLT;
-	}
-	if ( nsmpl_ > acq_.getMaxNSamples() ) {
-		nsmpl_ = acq_.getMaxNSamples();
-	}
-
-	acq_.setNSamples( nsmpl_ );
-	acq_.flushBuf();
 
 	paramsPool_.add( 10 );
+
 	{
-		auto p = paramsPool_.get();
+		ScopeParamsPtr p;
+
+		if ( jsonFnam ) {
+			paramsFileName_ = jsonFnam;
+			p = paramsPool_.get();
+			if ( scope_json_load( (*this)->scope(), paramsFileName_.c_str(), p.get() ) ) {
+				throw std::runtime_error( string("Loading JSON file '") + paramsFileName_ + "' failed." );
+			}
+			if ( !! (p->acqParams.mask & ACQ_PARAM_MSK_NSM) ) {
+				nsmpl_ = p->acqParams.nsamples;
+			}
+		}
+
+		if ( nsamples ) {
+			nsmpl_ = nsamples;
+		}
+
+		if ( nsmpl_ > acq_.getMaxNSamples() ) {
+			nsmpl_ = acq_.getMaxNSamples();
+			fprintf(stderr, "Number of samples reduced to max. supported by device: %d\n", nsmpl_);
+		}
+
+		acq_.setNSamples( nsmpl_ );
+		acq_.flushBuf();
+
+		if ( p ) {
+			if ( scope_set_params( (*this)->scope(), p.get() ) ) {
+				throw std::runtime_error("Scope::Scope - scope_set_params() failed");
+			}
+		} else {
+			p = paramsPool_.get();
+		}
+
 		if ( scope_get_params( (*this)->scope(), p.get() ) ) {
 			throw std::runtime_error("Scope::Scope - scope_get_params() failed");
+		}
+
+		if ( p->trigMode < 0 ) {
+			// set default
+			p->trigMode = static_cast<int>( TrigArmState::CONTINUOUS );
 		}
 		cmd_.scopeParams_ = p;
 	}
@@ -1852,7 +2009,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 		(*it)->subscribe( trigLvl_ );
 	}
 
-    MenuButton *mnu;
+    ParamMenuButton *mnu;
 
 	// Trigger source
 	{
@@ -2067,6 +2224,15 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, QObject *parent)
 	act           = unique_ptr<QAction>( new QAction( "Comment and Save Waveform To" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::editComment );
 	fileMen->addAction( act.release() );
+
+	act           = unique_ptr<QAction>( new QAction( "Load Settings" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::loadSettings );
+	fileMen->addAction( act.release() );
+
+	act           = unique_ptr<QAction>( new QAction( "Save Current Settings To" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::saveSettings );
+	fileMen->addAction( act.release() );
+
 
 	act           = unique_ptr<QAction>( new QAction( "Quit" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::quitAndExit );
@@ -2709,6 +2875,29 @@ Scope::addMeasPair( QGridLayout *grid, ScopePlot *plot, Measurement* (*measFacto
 }
 
 
+void
+Scope::loadSettings()
+{
+	const char *proposal = paramsFileName_.empty() ? "." : paramsFileName_.c_str();
+	string fileName = QFileDialog::getOpenFileName( mainWin_.get(), "Load Settings", proposal, "(*.json)" ).toStdString();
+	if ( fileName.empty() ) {
+		return;
+	}
+
+	auto params = paramsPool_.get();
+	if ( int st = scope_json_load( (*this)->scope(), fileName.c_str(), params.get() ) ) {
+		message( QString("Loading settings failed: ") + strerror(-st) );
+		return;
+	}
+	if ( !! (params->acqParams.mask & ACQ_PARAM_MSK_NSM) && params->acqParams.nsamples != getNSamples() ) {
+		message( QString("Unable to change the number of samples after startup, ignoring;\n"
+					"other parameters are still applied.") );
+		params->acqParams.mask &= ~ACQ_PARAM_MSK_NSM;
+	}
+	paramUpd_->update( params );
+	// we made changes underneath the GUI; propagate these back to the GUI
+	paramUpd_->updateGUI();
+}
 
 // Hmm - this requires the zoom area the callback was registered for to have the keyboard focus
 void
@@ -2754,11 +2943,17 @@ FFTMeasurement::getRawData(unsigned ch, int idx)
 static void
 usage(const char *nm)
 {
-	printf("usage: %s [-hsr] [-d <tty_device>] [-n <num_samples>] [-p <hdf5_path>] [-S <full_scale_volt>]\n", nm);
+	const char *msg = (0 == scope_json_supported()) ? " [-j <json_file]" : "";
+	printf("usage: %s [-hsr] [-d <tty_device>] [-n <num_samples>]%s [-p <hdf5_path>] [-S <full_scale_volt>]\n", nm, msg);
 	printf("  -h                  : Print this message.\n");
     printf("  -d tty_device       : Path to TTY device (defaults to '/dev/ttyACM0').\n");
 	printf("  -S full_scale_volt  : Change scale to 'full_scale_volt' (at 0dB\n");
 	printf("                        attenuation).\n");
+	if ( 0 == scope_json_supported() ) {
+    printf("  -j json_file        : Program the device to the settings stored in 'json_file'.\n");
+	} else {
+    printf("  -j json_file        : Not supported - JSON support not compiled in.\n");
+	}
 	printf("  -n num_samples      : Set number of samples to use (defaults to zero\n");
 	printf("                        which lets the app pick a default).\n");
 	printf("  -s                  : Simulation mode (connect to 'CommandWrapperSim'\n");
@@ -2780,6 +2975,7 @@ bool        sim      = false;
 unsigned    nsamples = 0;
 bool        safeQuit = true;
 const char *path     = nullptr;
+const char *json     = nullptr;
 int         opt;
 unsigned   *u_p;
 double     *d_p;
@@ -2795,12 +2991,13 @@ double      scale    = -1.0;
 	//
 	QApplication app(argc, argv);
 
-	while ( (opt = getopt( argc, argv, "d:hn:p:rsS:" )) > 0 ) {
+	while ( (opt = getopt( argc, argv, "d:hn:p:rsS:j:" )) > 0 ) {
 		u_p = 0;
 		d_p = 0;
 		switch ( opt ) {
 			case 'd': fnam = optarg;     break;
 			case 'h': usage( argv[0] );  return 0;
+			case 'j': json = optarg;     break;
 			case 'n': u_p  = &nsamples;  break;
 			case 'p': path     = optarg; break;
 			case 'r': safeQuit = false;  break;
@@ -2821,6 +3018,11 @@ double      scale    = -1.0;
 		}
 	}
 
+	if ( json && 0 != scope_json_supported() ) {
+		fprintf(stderr, "JSON support not compiled in - disabling\n");
+		json = nullptr;
+	}
+
 	try {
 		QFile file("stylesheet.qss");
 		file.open(QFile::ReadOnly);
@@ -2829,7 +3031,7 @@ double      scale    = -1.0;
 		fprintf(stderr, "Unable to load style sheet: %s\n", e.what());
 	}
 
-	Scope sc( FWComm::create( fnam ), sim, nsamples );
+	Scope sc( FWComm::create( fnam ), sim, nsamples, json );
 	if ( scale > 0.0 ) {
 		int i;
 		for ( i = 0; i < sc.numChannels(); ++i ) {

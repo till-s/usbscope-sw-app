@@ -151,7 +151,7 @@ public:
 	virtual void updateScale(ScaleXfrm *) = 0;
 };
 
-class ScaleXfrm : public LinXfrm, public ValUpdater {
+class ScaleXfrm : public LinXfrm, public virtual ValUpdater {
 	ScaleXfrmCallback       *cbck_;
 	bool                     vert_;
 	const QString           *uptr_;

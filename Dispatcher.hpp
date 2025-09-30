@@ -44,6 +44,8 @@ public:
 	virtual void visit(MeasDiff           *) {}
 	virtual void visit(CalDAC             *) {}
 	virtual void visit(DACRangeTgl        *) {}
+
+	virtual ~ValChangedVisitor() = default;
 };
 
 template <typename T>
@@ -69,9 +71,54 @@ public:
 		subscribers_.remove( v );
 	}
 
-	virtual ~Dispatcher()
-	{
-	}
+	virtual ~Dispatcher() = default;
 };
 
-typedef Dispatcher<ValChangedVisitor> ValUpdater;
+using ValUpdater = Dispatcher<ValChangedVisitor>;
+
+class ParamValUpdater;
+
+// Don't use the Dispatcher template even though the functionality
+// is very similar; the confusion of identical names becomes too great.
+class ParamChangedVisitor : public virtual ValChangedVisitor {
+	std::list<ParamValUpdater*> subscribers_;
+public:
+	virtual void updateGUI();
+
+	// reverse subscription; every GUI element that dispatches to the ValUpdateVisitor
+	// may be subscribed to the ValUpdateVisitor and triggered to update itself after
+	// the visitor's state has changed.
+
+	virtual void reverseSubscribe(ParamValUpdater *u)
+	{
+		subscribers_.push_back( u );
+	}
+
+	virtual void reverseUnsubscribe(ParamValUpdater *u)
+	{
+		subscribers_.remove( u );
+	}
+
+};
+
+class ParamValUpdater : public virtual ValUpdater {
+public:
+	// propagate changes in hard/software up to the GUI
+	virtual void updateGUI() = 0;
+
+	// allow simple ValChangedVisitors to subscribe as well
+	using ValUpdater::subscribe;
+	using ValUpdater::unsubscribe;
+
+	virtual void subscribe(ParamChangedVisitor *v)
+	{
+		ValUpdater::subscribe( v );
+		v->reverseSubscribe( this );
+	}
+
+	virtual void unsubscribe(ParamChangedVisitor *v)
+	{
+		v->reverseUnsubscribe( this );
+		Dispatcher<ValChangedVisitor>::unsubscribe( v );
+	}
+};

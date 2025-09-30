@@ -46,7 +46,7 @@ public:
 	}
 };
 
-class IntParamValidator : public ParamValidator, public ValUpdater {
+class IntParamValidator : public ParamValidator, public ParamValUpdater {
 protected:
 	int    val_;
 public:
@@ -69,7 +69,7 @@ public:
 	virtual void set(const QString &s) override;
 };
 
-class DblParamValidator : public ParamValidator, public ValUpdater {
+class DblParamValidator : public ParamValidator, public ParamValUpdater {
 protected:
 	double val_;
 public:

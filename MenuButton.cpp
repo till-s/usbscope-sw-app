@@ -1,8 +1,10 @@
 #include <QMenu>
+#include <stdexcept>
 
 #include <MenuButton.hpp>
 
 using std::vector;
+using std::string;
 
 TxtAction::TxtAction(const QString &txt, QObject *parent, TxtActionNotify *v)
 : QAction( txt, parent ),
@@ -54,3 +56,21 @@ MenuButton::notify(TxtAction *act)
 	valChanged();
 }
 
+unsigned
+MenuButton::numMenuEntries()
+{
+	if ( auto m = menu() ) {
+		return m->actions().size();
+	}
+	return 0;
+}
+
+// assume there are no separators nor submenus
+void
+MenuButton::setMenuEntry(unsigned n)
+{
+	if ( n >= numMenuEntries() ) {
+		throw std::runtime_error( string(__func__) + ": invalid  menu index" );
+	}
+	setText( menu()->actions().at( n )->text() );
+}

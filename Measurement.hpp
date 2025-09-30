@@ -12,7 +12,7 @@
 
 class MeasDiff;
 
-class Measurement : public ValChangedVisitor, public ValUpdater {
+class Measurement : public virtual ValChangedVisitor, public virtual ValUpdater {
 private:
 	// (optionally) hold a shared_ptr to a MeasDiff
 	std::shared_ptr<MeasDiff> measDiff_;
@@ -68,7 +68,7 @@ public:
 	}
 };
 
-class MeasDiff : public ValChangedVisitor, public ValUpdater {
+class MeasDiff : public virtual ValChangedVisitor, public virtual ValUpdater {
 private:
 	Measurement                *measA_;
 	Measurement                *measB_;

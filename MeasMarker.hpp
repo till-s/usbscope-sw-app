@@ -11,7 +11,7 @@
 #include <ScaleXfrm.hpp>
 #include <Measurement.hpp>
 
-class MeasMarker : public MovableMarker, public ValUpdater, public ValChangedVisitor {
+class MeasMarker : public MovableMarker, public virtual ValUpdater, public virtual ValChangedVisitor {
 	QColor                       color_;
 	QString                      style_;
 	QString                      xposAsString_;

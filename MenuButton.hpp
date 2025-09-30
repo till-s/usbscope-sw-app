@@ -31,13 +31,27 @@ public:
 	}
 };
 
-class MenuButton : public QPushButton, public TxtActionNotify, public ValUpdater {
+class MenuButton : public QPushButton, public TxtActionNotify, public virtual ValUpdater {
 public:
 	MenuButton( const std::vector<QString> &lbls, QWidget *parent );
+
+	virtual unsigned
+	numMenuEntries();
+
+	virtual void
+	setMenuEntry(unsigned n);
 
 	virtual void
 	clicked(bool checked);
 
 	virtual void
 	notify(TxtAction *act) override;
+};
+
+class ParamMenuButton : public MenuButton, public ParamValUpdater {
+public:
+	ParamMenuButton( const std::vector<QString> &lbls, QWidget *parent )
+	: MenuButton( lbls, parent )
+	{
+	}
 };
