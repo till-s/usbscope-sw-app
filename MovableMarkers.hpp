@@ -28,7 +28,7 @@ private:
 	QwtPlotPicker                  *picker_;
 	std::vector<MovableMarker *>    markers_;
 	int                             selected_;
-	
+
 public:
 	MovableMarkers(
 		QwtPlot                              *plot,

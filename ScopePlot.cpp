@@ -21,10 +21,10 @@ ScopePlot::ScopePlot( std::vector<QColor> *vChannelColors, QWidget *parent )
 : QwtPlot( parent )
 {
     this->setAutoReplot( true );
-    
+
     picker_       = new MyPicker( this->xBottom, this->yLeft, this->canvas() );
     picker_->setStateMachine( new QwtPickerDragPointMachine() );
-    
+
     lzoom_        = new ScopeZoomer( this->xBottom, this->yLeft, this->canvas() );
 
     // RHS zoomer 'silently' tracks the LHS one...
@@ -101,7 +101,7 @@ ScopePlot::getAxis(unsigned ch)
 		case 0: return QwtPlot::yLeft;
 		case 1: return QwtPlot::yRight;
 		default: break;
-	} 
+	}
 	return QwtPlot::axisCnt;
 }
 

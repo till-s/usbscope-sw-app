@@ -191,7 +191,7 @@ public:
 		norm_ = val;
 	}
 
-	
+
 	virtual
 	std::pair<double, const QString *>
 	normalize(double val, double max) override;

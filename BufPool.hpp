@@ -89,7 +89,7 @@ class FreeList {
 			}
 		}
 
-		virtual 
+		virtual
 		~FreeList() noexcept(false)
 		{
 			if ( totl_ != nelm_ ) {
@@ -268,6 +268,6 @@ public:
 			}
 			cond_.wait( g );
 		}
-		
+
 	}
 };

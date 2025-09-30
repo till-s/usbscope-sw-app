@@ -26,5 +26,5 @@ public:
 	// if 'other' is given then make a clone
 	ScopeParamsPtr
 	get(ScopeParamsCPtr other=ScopeParamsCPtr());
-	
+
 };

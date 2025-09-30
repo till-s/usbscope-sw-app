@@ -86,7 +86,7 @@ class ScopeReader : public QThread {
 	// this plan but use the 'new array' interface!
 
 	fftw_plan                   fftwPlan_;
-	
+
 public:
 	ScopeReader(
 		BoardInterface         *brd,

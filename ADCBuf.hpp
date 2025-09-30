@@ -28,7 +28,7 @@ class ADCBuf : public IntrusiveSmart::FreeListNode, public AcqSettings {
 private:
 	unsigned               stride_;     // elements in buffer: stride_*NCH
 	unsigned               nelms_;      // # valid elements (per channel)
-	unsigned               hdr_;        // header received from ADC 
+	unsigned               hdr_;        // header received from ADC
 	double                 avg_[NCH];   // measurement (avg)
 	double                 std_[NCH];   // measurement (std-dev)
 	bool                   mVld_[NCH];  // measurement valid flag
