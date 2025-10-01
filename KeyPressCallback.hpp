@@ -1,8 +1,10 @@
 #pragma once
 
+#include <QKeyEvent>
+
 class KeyPressCallback {
 public:
-	virtual void handleKeyPress(int key) = 0;
+	virtual void handleKeyPress(const QKeyEvent *) = 0;
 };
 
 

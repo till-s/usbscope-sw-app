@@ -48,7 +48,7 @@ ScopeZoomer::widgetKeyPressEvent( QKeyEvent *ke )
 			}
 		}
 		for ( auto it = keyHandlers_.begin(); it != keyHandlers_.end(); ++it ) {
-			(*it)->handleKeyPress( ke->key() );
+			(*it)->handleKeyPress( ke );
 		}
 	}
 	QwtPlotZoomer::widgetKeyPressEvent( ke );

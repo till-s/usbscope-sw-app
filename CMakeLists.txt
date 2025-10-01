@@ -32,6 +32,7 @@ set(SRCS
 	"ScopeParams.cpp"
 	"ChannelObject.cpp"
 	"Dispatcher.cpp"
+	"DelayVisualizer.cpp"
 )
 
 set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)

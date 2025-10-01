@@ -57,6 +57,7 @@
 #include <Measurement.hpp>
 #include <ScopeParams.hpp>
 #include <ChannelObject.hpp>
+#include <DelayVisualizer.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
@@ -117,7 +118,7 @@ private:
 	vector<QLabel*>                       vMeanLbls_;
 	vector<QLabel*>                       vStdLbls_;
 	vector<QLabel*>                       vMeasLbls_;
-	shared_ptr<MessageDialog>             msgDialog_;
+	MessageDialog                        *msgDialog_;
 	PlotScales                            plotScales_;
 	PlotScales                            fftScales_;
 	ScopeReader                          *reader_;
@@ -141,6 +142,7 @@ private:
 	QString                               comment_;
 	ScopeParamsPool                       paramsPool_;
 	string                                paramsFileName_;
+	DelayVisualizer                      *delayBar_;
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
@@ -542,7 +544,7 @@ public:
 	smplToString(int channel, int idx);
 
 	virtual void
-	handleKeyPress( int key ) override;
+	handleKeyPress(const QKeyEvent *) override;
 
 	ScopeParamsPtr
 	cloneScopeParams();
@@ -851,6 +853,87 @@ public:
 };
 
 
+class TrigArmMenu : public ParamMenuButton {
+private:
+	Scope        *scp_;
+
+	static vector<QString>
+	mkStrings(Scope *scp)
+	{
+		vector<QString> rv;
+		rv.push_back( "Off" );
+		rv.push_back( "Single"  );
+		rv.push_back( "Continuous"  );
+		return rv;
+	}
+
+public:
+	TrigArmMenu(Scope *scp, QWidget *parent = nullptr)
+	: ParamMenuButton( mkStrings( scp ), parent ),
+	  scp_           ( scp                      )
+	{
+		updateGUI();
+		scp_->clrTrgLED();
+		scp_->postTrgMode( getState() );
+	}
+
+	virtual void updateGUI() override
+	{
+		TrigArmState state;
+		switch ( scp_->currentParams()->trigMode ) {
+			case static_cast<int>( TrigArmState::CONTINUOUS ):
+				state = TrigArmState::CONTINUOUS;
+			break;
+			case static_cast<int>( TrigArmState::SINGLE     ):
+				state = TrigArmState::SINGLE;
+			break;
+			default:
+				state = TrigArmState::OFF;
+			break;
+		}
+		setMenuEntry( static_cast<unsigned>( state ) );
+	}
+
+	virtual TrigArmState
+	getState()
+	{
+		return static_cast<TrigArmState>( getMenuEntry() );
+	}
+
+	virtual void
+	accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+
+	virtual void
+	notify(TxtAction *act) override
+	{
+		TrigArmState state = static_cast<TrigArmState>( act->index() );
+		if ( state != TrigArmState::OFF ) {
+			scp_->clf();
+		}
+		ParamMenuButton::notify( act );
+	}
+
+	virtual void
+	update(TrigArmState newState)
+	{
+		// it would be nice to disable auto-trigger when the mode is switched
+		// to SINGLE - however, we cannot make TrigAutMenu a ValChangedVisitor
+		// and subscribe it to this menu -- the auto-trigger would be deactivated
+		// *after* logically switching to SINGLE and therefore spurious triggers
+		// could happen.
+		if ( newState != getState() ) {
+			setMenuEntry( static_cast<unsigned>( newState ) );
+			if ( newState != TrigArmState::OFF ) {
+				scp_->clf();
+			}
+			valChanged();
+		}
+	}
+};
+
 class TrigAutMenu : public ParamMenuButton {
 private:
 	Scope *scp_;
@@ -872,10 +955,15 @@ public:
 		updateGUI();
 	}
 
+	virtual bool isAutoOn()
+	{
+		return 0 == getMenuEntry();
+	}
+
 	virtual void updateGUI() override
 	{
-		int ms = scp_->acq()->getAutoTimeoutMS();
-		setMenuEntry( ms >= 0 ? 0 : 1 );
+		bool autoOn = (scp_->acq()->getAutoTimeoutMS() >= 0);
+		setMenuEntry( autoOn ? 0 : 1 );
 	}
 
 	virtual void
@@ -883,98 +971,8 @@ public:
 	{
 		v->visit( this );
 	}
-
 };
 
-class TrigArmMenu : public ParamMenuButton {
-private:
-	Scope        *scp_;
-	TrigArmState  state_;
-
-	static vector<QString>
-	mkStrings(Scope *scp)
-	{
-		vector<QString> rv;
-		rv.push_back( "Off" );
-		rv.push_back( "Single"  );
-		rv.push_back( "Continuous"  );
-		return rv;
-	}
-
-public:
-	TrigArmMenu(Scope *scp, QWidget *parent = nullptr)
-	: ParamMenuButton( mkStrings( scp ), parent ),
-	  scp_           ( scp                      )
-	{
-		updateGUI();
-		scp_->clrTrgLED();
-		scp_->postTrgMode( state_ );
-	}
-
-	virtual void updateGUI() override
-	{
-		switch ( scp_->currentParams()->trigMode ) {
-			case static_cast<int>( TrigArmState::CONTINUOUS ):
-				state_ = TrigArmState::CONTINUOUS;
-			break;
-			case static_cast<int>( TrigArmState::SINGLE     ):
-				state_ = TrigArmState::SINGLE;
-			break;
-			default:
-				state_ = TrigArmState::OFF;
-			break;
-		}
-		setMenuEntry( static_cast<unsigned>( state_ ) );
-	}
-
-	virtual TrigArmState
-	getState()
-	{
-		return state_;
-	}
-
-	virtual void
-	accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-
-	static TrigArmState
-	fromString(const QString &str)
-	{
-		if ( str == "Continuous" ) {
-			return TrigArmState::CONTINUOUS;
-		} else if ( str == "Single" ) {
-			return TrigArmState::SINGLE;
-		} else {
-			return TrigArmState::OFF;
-		}
-	}
-
-	virtual void
-	notify(TxtAction *act) override
-	{
-		state_ = fromString( act->text() );
-		if ( state_ != TrigArmState::OFF ) {
-			scp_->clf();
-		}
-		ParamMenuButton::notify( act );
-	}
-
-	virtual void
-	update(TrigArmState newState)
-	{
-		if ( newState != state_ ) {
-			state_ = newState;
-			switch ( state_ ) {
-				case TrigArmState::CONTINUOUS: setText("Continuous"); break;
-				case TrigArmState::SINGLE    : setText("Single");     break;
-				case TrigArmState::OFF       : setText("Off");        break;
-			}
-			valChanged();
-		}
-	}
-};
 
 class TrigLevel : public ParamValidator, public MovableMarker, public ParamValUpdater, public ValChangedVisitor {
 private:
@@ -1775,12 +1773,10 @@ public:
 			}
 		}
 
-
-		if ( ! isnan(dval = desired->acqParams.autoTimeoutMS) && ( dval != cur->acqParams.autoTimeoutMS ) ) {
-			scp_->acq()->setAutoTimeoutMS( dval );
+		if ( (ival = desired->acqParams.autoTimeoutMS) != cur->acqParams.autoTimeoutMS ) {
+			scp_->acq()->setAutoTimeoutMS( ival );
 			changed = true;
 		}
-
 
 		if ( desired->acqParams.level != cur->acqParams.level ) {
 			scp_->acq()->setTriggerLevelPercent( acq_level_to_percent( desired->acqParams.level ) );
@@ -1877,20 +1873,20 @@ public:
 
 
 Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObject *parent)
-: QObject        ( parent        ),
-  Board          ( fw, sim       ),
-  plotScales_    ( NUM_CHNLS     ),
-  fftScales_     ( NUM_CHNLS     ),
-  reader_        ( nullptr       ),
-  xRange_        ( nullptr       ),
-  fRange_        ( nullptr       ),
-  nsmpl_         ( NSMPL_DFLT    ),
+: QObject        ( parent                       ),
+  Board          ( fw, sim                      ),
+  plotScales_    ( NUM_CHNLS                    ),
+  fftScales_     ( NUM_CHNLS                    ),
+  reader_        ( nullptr                      ),
+  xRange_        ( nullptr                      ),
+  fRange_        ( nullptr                      ),
+  nsmpl_         ( NSMPL_DFLT                   ),
   pipe_          ( ScopeReaderCmdPipe::create() ),
-  trgArm_        ( nullptr       ),
-  single_        ( false         ),
-  lsync_         ( 0             ),
-  paramUpd_      ( nullptr       ),
-  paramsPool_    ( this          )
+  trgArm_        ( nullptr                      ),
+  single_        ( false                        ),
+  lsync_         ( 0                            ),
+  paramUpd_      ( nullptr                      ),
+  paramsPool_    ( this                         )
 {
 
 	paramsPool_.add( 10 );
@@ -2186,7 +2182,11 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 
 	// message dialog
 	QString msgTitle( "UsbScope Message" );
-	msgDialog_ = make_shared<MessageDialog>( mainWid.get(), &msgTitle );
+	msgDialog_ = new MessageDialog( mainWid.get(), &msgTitle );
+
+	// delay bar popup
+    delayBar_  = new DelayVisualizer( mainWid.get() );
+	delayBar_->reset();
 
 	// main central widget
 	auto centWid  = unique_ptr<QWidget>    ( new QWidget()     );
@@ -2901,14 +2901,19 @@ Scope::loadSettings()
 
 // Hmm - this requires the zoom area the callback was registered for to have the keyboard focus
 void
-Scope::handleKeyPress( int key )
+Scope::handleKeyPress( const QKeyEvent *ev )
 {
-	switch ( key ) {
+	switch ( ev->key() ) {
 		case Qt::Key_C:
 			clf();
 			break;
 		case Qt::Key_S:
 			trgArm_->update( TrigArmState::SINGLE );
+			break;
+		case Qt::Key_D:
+			if ( delayBar_->delay("Delayed Arming of Single-Shot Trigger", 10) ) {
+				trgArm_->update( TrigArmState::SINGLE );
+			}
 			break;
 		default:
 			break;
