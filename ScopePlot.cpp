@@ -24,6 +24,16 @@ ScopePlot::ScopePlot( std::vector<QColor> *vChannelColors, QWidget *parent )
 
     picker_       = new MyPicker( this->xBottom, this->yLeft, this->canvas() );
     picker_->setStateMachine( new QwtPickerDragPointMachine() );
+    // disable KeySelect1 for this picker. The ScopeZoomer already uses
+    // KeySelect1 (with Key_Enter) to define plot selections. Avoid jumping
+    // markers. We could map to a different key but the results are not
+    // that intuitive: nothing happens; the keypress just starts the drag -
+    // only once the pointer moves does the user get feedback.
+    // We just want to disable - curiously this is not possible and there
+    // is also no 'official' Qt::Key_None we could use. Some forum posts
+    // recommend tu just use 0.
+    static constexpr Qt::Key Key_None = Qt::Key_unknown;
+    picker_->setKeyPattern( QwtEventPattern::KeySelect1, Key_None  );
 
     lzoom_        = new ScopeZoomer( this->xBottom, this->yLeft, this->canvas() );
 
