@@ -11,8 +11,10 @@
 #include <list>
 
 #include <QApplication>
+#include <QScreen>
 #include <QMainWindow>
 #include <QDockWidget>
+#include <QMessageBox>
 #include <QMenuBar>
 #include <QMenu>
 #include <QLabel>
@@ -27,6 +29,7 @@
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QToolButton>
+#include <QStaticText>
 
 #include <qwt_text.h>
 #include <qwt_scale_div.h>
@@ -64,6 +67,46 @@ using std::shared_ptr;
 using std::make_shared;
 using std::vector;
 using std::string;
+
+namespace {
+	const QString helpText(
+	"# Scope Help\n"
+	"\n"
+	"## Plot Windows\n"
+	"\n"
+	"There are two plot windows. The main window showing data in the time-domain and\n"
+    "the FFT plot. The latter can be hidden ('View' menu) or undocked. Due to bugs in\n"
+    "Qt and/or my window manager automatic redocking does not work but there is a 'View'\n"
+    "menu entry to do just that.\n"
+	"\n"
+	"### Panning and Zooming\n"
+	"\n"
+	"The Qwt zoomer supports a stack of zooms.\n"
+	"\n"
+	" - `<Shft>-<MouseButton1>-<Drag>`: select an area to zoom.\n"
+	" - `<Enter>`: place one corner of the zoom selection at current pointer position.\n"
+	" - `<Ctrl>-<MouseButton1>-<Drag>`: moves the visible are of the plot.\n"
+	" - `<Esc>`: zoom out completely; removes all stack entries.\n"
+	" - `<O>`: walk-up one level in the zoom stack; zoom-out one level.\n"
+	" - `<I>`: walk-down one level in the zoom stack; zoom-in one level.\n"
+	"\n"
+	"### Markers and Trigger-Level\n"
+	"\n"
+	" - `<MouseButton1>-<Drag>`: moves the marker closest to the current pointer around.\n"
+	" - `<1>`: move marker 1 to the current pointer position.\n"
+	" - `<2>`: move marker 2 to the current pointer position.\n"
+	"\n"
+	"### Switching to Single-Shot Trigger\n"
+	"\n"
+	"When the main plot area has keyboard focus a single-shot acquisition can be armed\n"
+	"by pressing a key. A delayed option is available so that an operator may, e.g., position\n"
+	"probes before the trigger is armed.\n"
+	"\n"
+	" - `<S>`: arm single show trigger (make sure auto-triggering is disabled).\n"
+	" - `<D>`: delay for 10 seconds and then arm single-shot trigger.\n"
+	" - `<C>`: clear the plot area.\n"
+	);
+};
 
 class Scope;
 class TrigArmMenu;
@@ -119,6 +162,7 @@ private:
 	vector<QLabel*>                       vStdLbls_;
 	vector<QLabel*>                       vMeasLbls_;
 	MessageDialog                        *msgDialog_;
+	QMessageBox                          *hlpDialog_;
 	PlotScales                            plotScales_;
 	PlotScales                            fftScales_;
 	ScopeReader                          *reader_;
@@ -420,6 +464,13 @@ public:
 	redockFFT()
 	{
 		fftDockWid_->setFloating( false );
+	}
+
+	void
+	showHelp()
+	{
+		hlpDialog_->show();
+		hlpDialog_->raise();
 	}
 
 	void
@@ -2184,6 +2235,12 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 	QString msgTitle( "UsbScope Message" );
 	msgDialog_ = new MessageDialog( mainWid.get(), &msgTitle );
 
+	hlpDialog_ = new QMessageBox( mainWid.get() );
+	hlpDialog_->setTextFormat( Qt::MarkdownText );
+	hlpDialog_->setModal( false );
+	hlpDialog_->setWindowTitle( "UsbScope Help" );
+	hlpDialog_->setText( helpText );
+
 	// delay bar popup
     delayBar_  = new DelayVisualizer( mainWid.get() );
 	delayBar_->reset();
@@ -2193,6 +2250,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 	centWid->setLayout( horzLay.release() );
 	mainWid->setCentralWidget( centWid.release() );
 	mainWid->installEventFilter( this );
+	mainWid->resize(QGuiApplication::primaryScreen()->availableGeometry().size() * 0.7);
 	mainWin_.swap( mainWid );
 
 	// dockable widget for FFT
@@ -2262,6 +2320,14 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 	act           = unique_ptr<QAction>( new QAction( "Redock FFT" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::redockFFT );
 	viewMen->addAction( act.release() );
+
+	// Help menu
+	auto helpMen  = menuBar->addMenu( "Help" );
+
+	act           = unique_ptr<QAction>( new QAction( "Help" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::showHelp );
+	helpMen->addAction( act.release() );
+
 
 	mainWin_->setMenuBar( menuBar.release() );
 
