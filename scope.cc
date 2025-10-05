@@ -523,7 +523,17 @@ public:
 
 				h5f.addHSlab( nullptr, nullptr, buf->getRawData() );
 				h5f.addHdrInfo( buf->getHdr(), buf->getNumChannels() );
-				h5f.addScopeParams( buf->scopeParams().get() );
+				// the raw data have been scaled to the common refScaleVolt() so
+				// that all channels with identical input voltage and identical
+				// channel gains are scaled the same on the plot.
+				// When we save these rescaled data then we have to tweak
+				// the fullScaleVolt info (the currentScaleVolt are already
+				// based on the refScaleVolt)
+				auto newParams = buf->scopeParams()->clone();
+				for ( auto ch = 0; ch < buf->getNumChannels(); ++ch ) {
+					newParams->afeParams[ch].fullScaleVolt = refScaleVolt();
+				}
+				h5f.addScopeParams( newParams.get() );
 
 				if ( addComment ) {
 					h5f.addComment( comment_.toStdString() );
