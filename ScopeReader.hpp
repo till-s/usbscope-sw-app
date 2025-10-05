@@ -56,14 +56,19 @@ public:
 	copyCh(BufPtr buf, unsigned ch) override
 	{
 		// getData already checks validity of 'ch'
-		BufType::ElementType *dptr  = buf->getData( ch );
-		T                    *sptr  = reinterpret_cast<T*>( buf->getRawData() ) + ch;
-		unsigned              nelms = buf->getNElms();
+		BufType::ElementType *dptr            = buf->getData( ch );
+		T                    *sptr            = reinterpret_cast<T*>( buf->getRawData() ) + ch;
+		unsigned              nelms           = buf->getNElms();
+		double                scaleCorrection;
+		double                postGainOffsetTick;
 		if ( ((nelms - 1)*BufPoolType::NumChannels + ch) * sizeof(T) >= buf->getRawSize() ) {
 			throw std::runtime_error("Internal error: buffer overrun");
 		}
+		scaleCorrection    = 1.0/(buf->refScaleVolt()/buf->scopeParams()->afeParams[ch].fullScaleVolt);
+		postGainOffsetTick = buf->scopeParams()->afeParams[ch].postGainOffsetTick;
+
 		while ( nelms > 0 ) {
-			*dptr = static_cast< std::remove_reference<decltype(*dptr)>::type >( *sptr );
+			*dptr = scaleCorrection*(static_cast< std::remove_reference<decltype(*dptr)>::type >( *sptr ) - postGainOffsetTick);
 			dptr++;
 			sptr += BufPoolType::NumChannels;
 			nelms--;

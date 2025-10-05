@@ -1,12 +1,12 @@
 #pragma once
 
+#include <memory>
+
 #include <FWComm.hpp>
 #include <ADCBuf.hpp>
 #include <SysPipe.hpp>
 #include <AcqCtrl.hpp>
-#include <QFuture>
-#include <memory>
-#include <vector>
+#include <ScopeParams.hpp>
 
 static  constexpr size_t FIX_HARDCODED_NCH = 2;
 
@@ -33,22 +33,19 @@ public:
 	void
 	sendCmd(const ScopeReaderCmd *cmd)
 	{
-		// terrible hack to increment the reference
-		// count of the shared-pointer embedded in cmd
-		char mem[sizeof(cmd->scopeParams_)];
-		// placement new takes a reference but the
-		// so created Shp is never destroyed
-		// (but 'serialized' into the pipe)
-		new(static_cast<void*>(mem)) ScopeParamsCPtr(cmd->scopeParams_);
+		// make sure the object is safe to serialize
+		// (increment refcount of any embedded shared
+		// pointers)
+		cmd->prepareForSerialization();
 		write( cmd, sizeof(*cmd) );
 	}
 
 	void
 	waitCmd(ScopeReaderCmd *cmd)
 	{
-		// release SHP since it will be
+		// release embedded SHPs since it will be
 		// 'hard-overwritten'
-		cmd->scopeParams_.reset();
+		cmd->resetShp();
 		read( cmd, sizeof(*cmd) );
 	}
 
@@ -57,4 +54,16 @@ public:
 	{
 		return std::make_shared<ScopeReaderCmdPipe>();
 	}
+};
+
+class ScopeInterface {
+public:
+
+	virtual ScopeParamsCPtr
+	currentParams() = 0;
+
+	virtual void
+	loadParams(ScopeParamsCPtr) = 0;
+
+	virtual ~ScopeInterface() = default;
 };

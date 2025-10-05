@@ -11,6 +11,16 @@ unsigned impl::ScopeParams::getDecimation() const {
 	return acqParams.cic0Decimation * acqParams.cic1Decimation;
 }
 
+ScopeParamsPtr
+impl::ScopeParams::clone() const
+{
+	auto pool = static_cast<ScopeParamsPool*>( list() );
+	// unlike std::shared_ptr we can simply create a new intrusive SHP out
+	// of thin air - because it knows how to access the control-block/refcnt
+	ScopeParamsCPtr other( this );
+	return pool->get( other );
+}
+
 
 ScopeParamsPool::ScopeParamsPool(BoardInterface *brd)
 : BoardRef ( brd      )

@@ -11,12 +11,80 @@
 #include <AcqCtrl.hpp>
 #include <ScopeParams.hpp>
 
-struct AcqSettings {
+class AcqSettings {
 	unsigned            sync_{0};     // count/flag that can be used to sync parameter changes across fifo domains
 	ScopeParamsCPtr     scopeParams_;
+	double              refScaleVolt_;
 
-	unsigned getSync() const {
+public:
+
+	ScopeParamsCPtr
+	scopeParams() const
+	{
+		return scopeParams_;
+	}
+
+	void
+	setScopeParams(ScopeParamsCPtr scopeParams)
+	{
+		scopeParams_ = scopeParams;
+		setRefScaleVolt();
+	}
+
+	double
+	refScaleVolt() const
+	{
+		return refScaleVolt_;
+	}
+
+	void
+	prepareForSerialization() const
+	{
+   	    // terrible hack to increment the reference
+        // count of the shared-pointer embedded in cmd
+        char mem[sizeof(scopeParams_)];
+        // placement new takes a reference but the
+        // so created Shp is never destroyed
+        // (but 'serialized' into the pipe)
+        new(static_cast<void*>(mem)) ScopeParamsCPtr(scopeParams_);
+	}
+
+	void
+	resetShp()
+	{
+  	    // release SHP since it will be
+        // 'hard-overwritten'
+        scopeParams_.reset();
+	}
+
+	void
+	setRefScaleVolt(double refScaleVolt)
+	{
+		refScaleVolt_ = refScaleVolt;
+	}
+
+	void
+	setRefScaleVolt()
+	{
+		double min = scopeParams_->afeParams[0].fullScaleVolt;
+		for ( unsigned ch = 1; ch < scopeParams_->numChannels; ++ch ) {
+			if ( scopeParams_->afeParams[ch].fullScaleVolt < min ) {
+				min = scopeParams_->afeParams[ch].fullScaleVolt;
+			}
+		}
+		refScaleVolt_ = min;
+	}
+
+	unsigned
+	getSync() const
+	{
 		return sync_;
+	}
+
+	void
+	incrementSync()
+	{
+		sync_++;
 	}
 };
 
@@ -63,7 +131,7 @@ public:
 		for (int i = 0; i < NCH; i++ ) {
 			mVld_ [i] = false;
 		}
-		scopeParams_.reset();
+		resetShp();
 	}
 
 	virtual void unmanage(const Key &k) override {

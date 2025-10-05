@@ -4,17 +4,27 @@
 #include <IntrusiveShp.hpp>
 #include <BoardRef.hpp>
 
+// fwd declaration
 namespace impl {
-
-class ScopeParams : public IntrusiveSmart::FreeListNode, public ::ScopeParams {
-public:
-	unsigned getDecimation() const;
-};
-
+	class ScopeParams;
 };
 
 typedef IntrusiveSmart::Shp<impl::ScopeParams>       ScopeParamsPtr;
 typedef IntrusiveSmart::Shp<const impl::ScopeParams> ScopeParamsCPtr;
+
+namespace impl {
+
+
+class ScopeParams : public IntrusiveSmart::FreeListNode, public ::ScopeParams {
+public:
+	unsigned
+	getDecimation() const;
+
+	ScopeParamsPtr
+	clone() const;
+};
+
+};
 
 class ScopeParamsPool : public IntrusiveSmart::FreeListBase, public BoardRef {
 public:
