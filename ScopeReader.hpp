@@ -64,7 +64,7 @@ public:
 		if ( ((nelms - 1)*BufPoolType::NumChannels + ch) * sizeof(T) >= buf->getRawSize() ) {
 			throw std::runtime_error("Internal error: buffer overrun");
 		}
-		scaleCorrection    = 1.0/(buf->refScaleVolt()/buf->scopeParams()->afeParams[ch].fullScaleVolt);
+		scaleCorrection    = buf->getScaleCorrection(ch);
 		postGainOffsetTick = buf->scopeParams()->afeParams[ch].postGainOffsetTick;
 
 		while ( nelms > 0 ) {

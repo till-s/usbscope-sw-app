@@ -32,6 +32,12 @@ public:
 	}
 
 	double
+	getScaleCorrection(unsigned ch)
+	{
+		return 1.0/(refScaleVolt()/scopeParams()->afeParams[ch].fullScaleVolt);
+	}
+
+	double
 	refScaleVolt() const
 	{
 		return refScaleVolt_;
