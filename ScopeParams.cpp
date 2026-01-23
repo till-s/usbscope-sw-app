@@ -56,6 +56,7 @@ ScopeParamsPool::get(ScopeParamsCPtr other)
 	auto rv = FreeListBase::get<typename ScopeParamsPtr::element_type>();
 	if ( ! rv ) {
 		// out of buffers
+		fprintf(stderr, "ScopeParamsPool exhausted - consider reconfiguring it\n");
 		throw std::bad_alloc();
 	}
 	if ( other ) {
