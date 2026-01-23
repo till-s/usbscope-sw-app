@@ -1981,6 +1981,10 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 			fprintf(stderr, "Number of samples reduced to max. supported by device: %d\n", nsmpl_);
 		}
 
+		if ( p && !! (p->acqParams.mask & ACQ_PARAM_MSK_NSM) ) {
+			p->acqParams.nsamples = nsmpl_;
+		}
+
 		acq_.setNSamples( nsmpl_ );
 		acq_.flushBuf();
 
