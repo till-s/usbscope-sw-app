@@ -3068,6 +3068,8 @@ const char *json     = nullptr;
 int         opt;
 unsigned   *u_p;
 double     *d_p;
+const char *s_p;
+char        units;
 double      scale    = -1.0;
 
 	if ( ! fnam && ! (fnam = getenv("BBCLI_DEVICE")) ) {
@@ -3081,13 +3083,14 @@ double      scale    = -1.0;
 	QApplication app(argc, argv);
 
 	while ( (opt = getopt( argc, argv, "d:hn:p:rsS:j:" )) > 0 ) {
-		u_p = 0;
-		d_p = 0;
+		u_p = nullptr;
+		d_p = nullptr;
+		s_p = nullptr;
 		switch ( opt ) {
 			case 'd': fnam = optarg;     break;
 			case 'h': usage( argv[0] );  return 0;
 			case 'j': json = optarg;     break;
-			case 'n': u_p  = &nsamples;  break;
+			case 'n': s_p  = optarg;     break;
 			case 'p': path     = optarg; break;
 			case 'r': safeQuit = false;  break;
 			case 's': sim  = true;       break;
@@ -3104,6 +3107,30 @@ double      scale    = -1.0;
 		if ( d_p && 1 != sscanf( optarg, "%lg", d_p ) ) {
 			fprintf(stderr, "Error: unable to scan argument of option -%c\n", opt);
 			return 1;
+		}
+		if ( s_p ) {
+			switch ( sscanf( s_p, "%i%c", &nsamples, &units ) ) {
+				case 2:
+					switch ( toupper( units ) ) {
+						case 'M':
+							nsamples *= 1024;
+							/* fall through */
+						case 'K':
+							nsamples *= 1024;
+							break;
+						default:
+							fprintf(stderr, "Error: invalid units '%c'\n", units);
+							return 1;
+					}
+					/* fall through */
+				case 1:
+					break;
+
+				default:
+					fprintf(stderr, "Error: unable to scan argument of option -%c\n", opt);
+					return 1;
+			}
+			printf("Nsamples from commandline: 0x%x, %u\n", nsamples, nsamples);
 		}
 	}
 
