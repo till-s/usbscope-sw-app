@@ -510,8 +510,9 @@ public:
 				size_t                    nch = buf->getNumChannels();
 				dims.push_back( Dim().max( buf->getMaxNElms() ).cnt( buf->getNElms() ) );
 				dims.push_back( Dim().max( nch ).cnt( nch ) );
-				unsigned precision;
 
+#ifdef STORE_RAW_SAMPLES
+				unsigned precision;
 				try {
 					precision = getSampleSize();
 				} catch ( std::runtime_error &e ) {
@@ -520,20 +521,33 @@ public:
 				unsigned ceilPrecision = ((precision + 7)>>3)<<3;
 				unsigned offset = ceilPrecision - precision;
 
-				H5Smpl h5f( fileName, INT16_T, offset, precision, dims );
-
+				H5Smpl    h5f( fileName, INT16_T, offset, precision, dims );
 				h5f.addHSlab( nullptr, nullptr, buf->getRawData() );
+#else
+				H5Smpl    h5f( fileName, FLOAT_T, 0, 0, dims );
+				std::vector<Dim> onedim;
+				onedim.push_back( dims[0] );
+				H5DSpace  h5s( onedim, DOUBLE_T, 0, 0);
+				for ( auto ch = 0; ch < buf->getNumChannels(); ++ch ) {
+					dims[1].cnt(1).off(ch);
+					h5f.addHSlab( &dims, &h5s, buf->getData(ch) );
+				}
+#endif
+
 				h5f.addHdrInfo( buf->getHdr(), buf->getNumChannels() );
-				// the raw data have been scaled to the common refScaleVolt() so
+#ifdef STORE_RAW_SAMPLES
+				// The raw float data have been scaled to the common refScaleVolt() so
 				// that all channels with identical input voltage and identical
 				// channel gains are scaled the same on the plot.
-				// When we save these rescaled data then we have to tweak
-				// the fullScaleVolt info (the currentScaleVolt are already
-				// based on the refScaleVolt)
+				// However, we are saving the raw digitizer data which was not scaled.
+				// Thus, for the currentScaleVolt we have to undo the relative scaling!
 				auto newParams = buf->scopeParams()->clone();
 				for ( auto ch = 0; ch < buf->getNumChannels(); ++ch ) {
-					newParams->afeParams[ch].fullScaleVolt = refScaleVolt();
+					newParams->afeParams[ch].currentScaleVolt /= buf->getScaleCorrection(ch);
 				}
+#else
+				auto newParams = buf->scopeParams();
+#endif
 				h5f.addScopeParams( newParams.get() );
 
 				if ( addComment ) {
