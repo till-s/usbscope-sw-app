@@ -30,6 +30,7 @@
 #include <QInputDialog>
 #include <QToolButton>
 #include <QStaticText>
+#include <QProgressDialog>
 
 #include <qwt_text.h>
 #include <qwt_scale_div.h>
@@ -2662,6 +2663,24 @@ Scope::clf()
 	}
 }
 
+class Planner : public QThread {
+	ScopeReader *reader_;
+	QProgressDialog *dialog_;
+public:
+	Planner(ScopeReader *r, QProgressDialog *d) : reader_(r), dialog_(d)
+	{
+	}
+
+protected:
+	virtual void run() override {
+		/* Unfortunately, we cannot interrupt the planning not get progress info;
+		 * only can let the user abort the program if they don't want to wait...
+		 */
+		reader_->createFFTWPlan();
+		QMetaObject::invokeMethod( dialog_, "setValue", Qt::QueuedConnection, Q_ARG(int, 1));
+	}
+};
+
 void
 Scope::startReader(unsigned poolDepth)
 {
@@ -2671,8 +2690,20 @@ Scope::startReader(unsigned poolDepth)
 	size_t rawElSz = acq()->getBufSampleSize();
 	BufPoolPtr bufPool = make_shared<BufPoolPtr::element_type>( nsmpl_, rawElSz );
 	bufPool->add( poolDepth );
+
+	std::unique_ptr<QProgressDialog> progress( new QProgressDialog() );
+	progress->setLabel( new QLabel( "Computing FFT Wisdom; please be patient" ) );
+	progress->setCancelButtonText( "Cancel/Abort Progrem" );
+	progress->setMinimum(0);
+	progress->setMaximum(1);
+	progress->setMinimumDuration(2000);
+	progress->setWindowModality( Qt::WindowModal );
+	QObject::connect( progress.get(), &QProgressDialog::canceled, this, &Scope::quitAndExit );
+	progress->setValue(0);
 	reader_ = new ScopeReader( unlockedPtr(), bufPool, pipe_, this );
-	reader_->createFFTWPlan();
+	Planner p(reader_, progress.get());
+	p.start();
+	progress->exec();
 	reader_->start();
 }
 
