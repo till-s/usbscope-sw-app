@@ -2668,6 +2668,7 @@ Scope::startReader(unsigned poolDepth)
 	BufPoolPtr bufPool = make_shared<BufPoolPtr::element_type>( nsmpl_, rawElSz );
 	bufPool->add( poolDepth );
 	reader_ = new ScopeReader( unlockedPtr(), bufPool, pipe_, this );
+	reader_->createFFTWPlan();
 	reader_->start();
 }
 

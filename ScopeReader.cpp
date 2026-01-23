@@ -26,18 +26,33 @@ ScopeReader::ScopeReader(
 		readBuf_  = new ReadBuf<int8_t>( &acq_ );
 	}
 
+}
+
+
+void ScopeReader::createFFTWPlan(bool readWisdom, bool writeWisdom)
+{
 	BufPtr buf = bufPool_->get();
 
 	// Note: this buffer is only used to create the plan but it is
 	// also remembered by the plan; NEVER use plain fftw_execute with
 	// this plan but use the 'new array' interface!
 
+	if ( readWisdom ) {
+		fftw_import_wisdom_from_filename("scope_fftw_wisdom.bin");
+	}
+
 	fftwPlan_ = fftw_plan_dft_r2c_1d( buf->getMaxNElms(), buf->getData(0), buf->getFFT(0), FFTW_MEASURE | FFTW_PRESERVE_INPUT );
+
+	if ( writeWisdom ) {
+		fftw_export_wisdom_to_filename("scope_fftw_wisdom.bin");
+	}
 }
 
 ScopeReader::~ScopeReader()
 {
-		fftw_destroy_plan( fftwPlan_ );
+		if ( fftwPlan_ ) {
+			fftw_destroy_plan( fftwPlan_ );
+		}
 		delete readBuf_;
 }
 
@@ -47,6 +62,11 @@ ScopeReader::run()
 	struct pollfd pfd[2];
 	int    nfds = 0;
 	int    timo = 100; // milli-seconds
+
+	if ( ! fftwPlan_ ) {
+		fprintf(stderr, "INTERNAL ERROR: ScopeReader::createFFTWPlan() was not called\n");
+		abort();
+	}
 
 	pfd[nfds].fd     = pipe_->getReadFD();
 	pfd[nfds].events = POLLIN;

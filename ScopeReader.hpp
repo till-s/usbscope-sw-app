@@ -90,7 +90,7 @@ class ScopeReader : public QThread {
 	// also remembered by the plan; NEVER use plain fftw_execute with
 	// this plan but use the 'new array' interface!
 
-	fftw_plan                   fftwPlan_;
+	fftw_plan                   fftwPlan_ {nullptr};
 
 public:
 	ScopeReader(
@@ -100,6 +100,12 @@ public:
 		QObject                *notifed,
 		QObject                *parent = NULL
 	);
+
+	// creating FFTW plan can take some time; use separate method
+	// so we can design some UI around it; unfortunately fftw
+	// does not give us progress feedback nor do they allow us to
+	// abort the planning :-(
+	void createFFTWPlan(bool readWisdom = true, bool writeWisdom = true);
 
 	void run() override;
 
