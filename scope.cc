@@ -1956,7 +1956,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
   paramsPool_    ( this                         )
 {
 
-	paramsPool_.add( 10 );
+	paramsPool_.add( 20 );
 
 	{
 		ScopeParamsPtr p;
