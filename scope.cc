@@ -1632,25 +1632,6 @@ public:
 	}
 };
 
-
-vector<const char *>
-ScaleXfrm::bigfmt_ = vector<const char *>({
-		"%s",
-		"k%s",
-		"M%s",
-		"G%s",
-		"T%s"
-	});
-
-vector<const char *>
-ScaleXfrm::smlfmt_ = vector<const char *>({
-		"%s",
-		"m%s",
-		"u%s",
-		"n%s",
-		"p%s"
-	});
-
 // Visitor to forward GUI settings to the device
 class ParamUpdateVisitor : public ParamChangedVisitor {
 	Scope *scp_;
@@ -2642,10 +2623,14 @@ Scope::newData(BufPtr buf)
 
 		// measurements
 
-		auto xfrm = axisVScl(ch);
+		ScaleXfrm *xfrm = axisVScl(ch);
 
-		vMeanLbls_[ch]->setText( QString::asprintf("%7.2f", xfrm->linr(buf->getAvg(ch))) + *xfrm->getUnit() );
-		vStdLbls_ [ch]->setText( QString::asprintf("%7.2f", xfrm->linr(buf->getStd(ch))) + *xfrm->getUnit() );
+		double val = xfrm->linr( buf->getAvg( ch ), false );
+		auto nrm  = xfrm->normalize( val );
+		vMeanLbls_[ch]->setText( QString::asprintf("%7.2f", val*nrm.first) + nrm.second );
+		val  = xfrm->linr( buf->getStd( ch ), false );
+		nrm  = xfrm->normalize( val );
+		vStdLbls_ [ch]->setText( QString::asprintf("%7.2f", val*nrm.first) + nrm.second );
 
 		// overrange flag
 		bool ovrRng = acq_.bufHdrFlagOverrange( hdr, ch );

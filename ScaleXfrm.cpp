@@ -1,5 +1,23 @@
 #include <ScaleXfrm.hpp>
 
+std::vector<const char *>
+ScaleXfrm::bigfmt_ = std::vector<const char *>({
+		"%s",
+		"k%s",
+		"M%s",
+		"G%s",
+		"T%s"
+	});
+
+std::vector<const char *>
+ScaleXfrm::smlfmt_ = std::vector<const char *>({
+		"%s",
+		"m%s",
+		"u%s",
+		"n%s",
+		"p%s"
+	});
+
 double
 LinXfrm::linr(double val, bool decNorm) const
 {
