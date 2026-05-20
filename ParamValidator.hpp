@@ -3,7 +3,6 @@
 #include <QValidator>
 #include <QLineEdit>
 #include <QString>
-#include <QState>
 
 #include <Dispatcher.hpp>
 

@@ -2,6 +2,9 @@
 
 #include <vector>
 
+#include <QObject>
+#include <QRectF>
+
 #include <qwt_scale_draw.h>
 
 #include <Dispatcher.hpp>

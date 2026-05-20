@@ -38,7 +38,7 @@ Measurement::getAsString(int ch, const char *fmt)
 	ScaleXfrm *xfrm = (ch < 0 ? scales_->h : scales_->v[ch]);
 
 	auto p = xfrm->normalize( v );
-	return QString::asprintf(fmt, v*p.first) + p.second;
+	return QString::asprintf(fmt, v*p.first) + *p.second;
 }
 
 void

@@ -2,14 +2,27 @@ cmake_minimum_required(VERSION 3.20)
 
 project(scope LANGUAGES CXX)
 
-find_package(Qt5 REQUIRED COMPONENTS Widgets)
+option(USE_QT6 "Use Qt6 - most likely you need to built QWT yourself!" OFF)
+set(CACHE{QTW_QT6_PATH} TYPE PATH HELP "Path to QWT built against QT6 with lib/ and include/ subdirs" VALUE not-set-use-D)
+
+if (USE_QT6)
+	find_package(Qt6 REQUIRED COMPONENTS Widgets)
+	set(QT_LIBS Qt6::Widgets)
+	find_library(QWT NAMES qwt-qt6 PATHS ${QWT_QT6_PATH}/lib NO_DEFAULT_PATH)
+	set(QWT_INC_PATH ${QWT_QT6_PATH}/include)
+else()
+	find_package(Qt5 REQUIRED COMPONENTS Widgets)
+	set(QT_LIBS Qt5::Widgets)
+	find_library(QWT NAMES qwt qwt6 qwt-qt5)
+	set(QWT_INC_PATH /usr/include/qwt)
+endif()
 
 find_package(HDF5 COMPONENTS C)
 
 add_subdirectory(usbadc-support/sw)
 add_subdirectory(fwcommCPP)
 
-find_library(QWT NAMES qwt qwt6 qwt-qt5 fftw3)
+find_library(FFTW3 NAMES fftw3)
 find_library(JANSSON NAMES jansson)
 
 set(AUTOMOC ON)
@@ -35,7 +48,7 @@ set(SRCS
 	"DelayVisualizer.cpp"
 )
 
-set(LIBS ${QWT} Qt5::Widgets fwLib fwcomm fftw3)
+set(LIBS ${QWT} ${QT_LIBS} fwLib fwcomm ${FFTW3})
 if (HDF5_FOUND)
 	list(APPEND LIBS ${HDF5_LIBRARIES})
 endif()
@@ -43,7 +56,7 @@ if (JANSSON_FOUND)
 	list(APPEND LIBS ${JANSSON_LIBRARIES})
 endif()
 
-include_directories(./ IntrusiveSharedPointer fwcommCPP usbadc-support/sw /usr/include/qwt)
+include_directories(./ IntrusiveSharedPointer fwcommCPP usbadc-support/sw ${QWT_INC_PATH})
 
 add_executable(scope ${SRCS})
 set_target_properties(scope PROPERTIES AUTOMOC ON)

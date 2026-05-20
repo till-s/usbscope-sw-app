@@ -2627,10 +2627,10 @@ Scope::newData(BufPtr buf)
 
 		double val = xfrm->linr( buf->getAvg( ch ), false );
 		auto nrm  = xfrm->normalize( val );
-		vMeanLbls_[ch]->setText( QString::asprintf("%7.2f", val*nrm.first) + nrm.second );
+		vMeanLbls_[ch]->setText( QString::asprintf("%7.2f", val*nrm.first) + *nrm.second );
 		val  = xfrm->linr( buf->getStd( ch ), false );
 		nrm  = xfrm->normalize( val );
-		vStdLbls_ [ch]->setText( QString::asprintf("%7.2f", val*nrm.first) + nrm.second );
+		vStdLbls_ [ch]->setText( QString::asprintf("%7.2f", val*nrm.first) + *nrm.second );
 
 		// overrange flag
 		bool ovrRng = acq_.bufHdrFlagOverrange( hdr, ch );

@@ -1,4 +1,5 @@
 #include <ScaleXfrm.hpp>
+#include <qwt_text.h>
 
 std::vector<const char *>
 ScaleXfrm::bigfmt_ = std::vector<const char *>({

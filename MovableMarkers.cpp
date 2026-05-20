@@ -1,5 +1,6 @@
-#include <MovableMarkers.hpp>
 #include <math.h>
+#include <qwt_scale_map.h>
+#include <MovableMarkers.hpp>
 
 MovableMarkers::MovableMarkers(
 	QwtPlot                              *plot,

@@ -70,7 +70,7 @@ void
 ScopePlot::clf()
 {
     for ( int ch = 0; ch < vPltCurv_.size(); ch++ ) {
-        vPltCurv_[ch]->setRawSamples( nullptr, nullptr, 0 );
+        vPltCurv_[ch]->setRawSamples( static_cast<double*>(nullptr), nullptr, 0 );
     }
 }
 

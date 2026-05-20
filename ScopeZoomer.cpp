@@ -3,6 +3,7 @@
 #include <QKeyEvent>
 
 #include <qwt_scale_draw.h>
+#include <qwt_text.h>
 
 ScopeZoomer::ScopeZoomer( int xAxisId, int yAxisId, QWidget *canvas )
 : QwtPlotZoomer( xAxisId, yAxisId, canvas )

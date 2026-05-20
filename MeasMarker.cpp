@@ -46,7 +46,7 @@ MeasMarker::update( const QPointF & pointOrig )
 	setValue( point );
 	double tVal = measurement_->getScales()->h->linr( xValue(), false );
 	auto p = measurement_->getScales()->h->normalize( tVal );
-	xposAsString_ = QString::asprintf("%5.3f", tVal*p.first) + p.second;
+	xposAsString_ = QString::asprintf("%5.3f", tVal*p.first) + *p.second;
 
 	valChanged();
 }
