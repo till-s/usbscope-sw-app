@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(scope LANGUAGES CXX)
 
 option(USE_QT6 "Use Qt6 - most likely you need to built QWT yourself!" OFF)
-set(CACHE{QTW_QT6_PATH} TYPE PATH HELP "Path to QWT built against QT6 with lib/ and include/ subdirs" VALUE not-set-use-D)
+set(CACHE{QWT_QT6_PATH} TYPE PATH HELP "Path to QWT built against QT6 with lib/ and include/ subdirs" VALUE not-set-use-D)
 
 if (USE_QT6)
 	find_package(Qt6 REQUIRED COMPONENTS Widgets)
