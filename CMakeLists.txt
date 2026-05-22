@@ -46,6 +46,7 @@ set(SRCS
 	"ChannelObject.cpp"
 	"Dispatcher.cpp"
 	"DelayVisualizer.cpp"
+	"FlashProgrammer.cpp"
 )
 
 set(LIBS ${QWT} ${QT_LIBS} fwLib fwcomm ${FFTW3})

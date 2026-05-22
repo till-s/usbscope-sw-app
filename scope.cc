@@ -43,6 +43,7 @@
 #include <H5Smpl.hpp>
 
 #include <jsonSup.h>
+#include <fwUtil.h>
 
 #include <DataReadyEvent.hpp>
 #include <ScopeReader.hpp>
@@ -62,6 +63,7 @@
 #include <ScopeParams.hpp>
 #include <ChannelObject.hpp>
 #include <DelayVisualizer.hpp>
+#include <FlashProgrammer.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
@@ -164,6 +166,7 @@ private:
 	vector<QLabel*>                       vMeasLbls_;
 	MessageDialog                        *msgDialog_;
 	QMessageBox                          *hlpDialog_;
+	QMessageBox                          *abtDialog_;
 	PlotScales                            plotScales_;
 	PlotScales                            fftScales_;
 	ScopeReader                          *reader_;
@@ -187,6 +190,7 @@ private:
 	QString                               comment_;
 	ScopeParamsPool                       paramsPool_;
 	string                                paramsFileName_;
+	string                                flashFileName_;
 	DelayVisualizer                      *delayBar_;
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
@@ -479,6 +483,43 @@ public:
 		hlpDialog_->show();
 		hlpDialog_->raise();
 	}
+
+	void
+	showAbout()
+	{
+		abtDialog_->show();
+		abtDialog_->raise();
+	}
+
+	void
+	programFlash()
+	{
+		const char *proposal = flashFileName_.empty() ? "." : flashFileName_.c_str();
+		string fileName = QFileDialog::getOpenFileName( mainWin_.get(), "Firmware Binary File", proposal, "(*.hex.bin);; All Files (*)" ).toStdString();
+		if ( fileName.empty() ) {
+			return;
+		}
+		uint8_t               *binData;
+		off_t                  binDataSize;
+		int                    status;
+		static constexpr off_t creatSz  = 0;
+		static constexpr int   readOnly = 1;
+		status = fileMap( fileName.c_str(), &binData, &binDataSize, creatSz, readOnly );
+		if ( status < 0 ) {
+			message( QString::asprintf("Unable to open and map %s: %s", fileName.c_str(), strerror( -status ) ) );
+			return;
+		}
+
+		std::unique_ptr<FlashProgrammer> programmer( new FlashProgrammer( mainWin_.get(), flash_, binData, binDataSize ) );
+		const FlashError * err = programmer->exec();
+		if ( err ) {
+			message(QString("Flash Programming FAILED: ") + err->what());
+		} else {
+			message("Flash Successfully Written\nDon't forget to reconfigure FPGA (e.g., power-cycle)!");
+		}
+		flashFileName_ = fileName;
+	}
+
 
 	void
 	saveToFile()
@@ -2257,6 +2298,22 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 	hlpDialog_->setWindowTitle( "UsbScope Help" );
 	hlpDialog_->setText( helpText );
 
+	abtDialog_ = new QMessageBox( mainWid.get() );
+	hlpDialog_->setTextFormat( Qt::MarkdownText );
+	abtDialog_->setModal( false );
+	abtDialog_->setWindowTitle( "About UsbScope" );
+	abtDialog_->setText( 
+		QString::asprintf(
+			"Hardware/Board   : %u\n"
+			"Firmware git hash: %08x\n"
+			"Firmware API     : %u\n",
+			fwp()->getBoardVersion(),
+			fwp()->getFWVersion(),
+			fwp()->getAPIVersion()
+		)
+	);
+
+
 	// delay bar popup
     delayBar_  = new DelayVisualizer( mainWid.get() );
 	delayBar_->reset();
@@ -2338,10 +2395,20 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 	viewMen->addAction( act.release() );
 
 	// Help menu
+	auto toolMen  = menuBar->addMenu( "Tools" );
+	act           = unique_ptr<QAction>( new QAction( "Program Firmware to Flash" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::programFlash );
+	toolMen->addAction( act.release() );
+
+	// Help menu
 	auto helpMen  = menuBar->addMenu( "Help" );
 
 	act           = unique_ptr<QAction>( new QAction( "Help" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::showHelp );
+	helpMen->addAction( act.release() );
+
+	act           = unique_ptr<QAction>( new QAction( "About" ) );
+	QObject::connect( act.get(), &QAction::triggered, this, &Scope::showAbout );
 	helpMen->addAction( act.release() );
 
 
@@ -2690,7 +2757,7 @@ Scope::startReader(unsigned poolDepth)
 	BufPoolPtr bufPool = make_shared<BufPoolPtr::element_type>( nsmpl_, rawElSz );
 	bufPool->add( poolDepth );
 
-	std::unique_ptr<QProgressDialog> progress( new QProgressDialog() );
+	std::unique_ptr<QProgressDialog> progress( new QProgressDialog( mainWin_.get() ) );
 	progress->setLabel( new QLabel( "Computing FFT Wisdom; please be patient" ) );
 	progress->setCancelButtonText( "Cancel/Abort Progrem" );
 	progress->setMinimum(0);
@@ -2703,6 +2770,7 @@ Scope::startReader(unsigned poolDepth)
 	Planner p(reader_, progress.get());
 	p.start();
 	progress->exec();
+	p.wait();
 	reader_->start();
 }
 
@@ -3173,14 +3241,6 @@ double      scale    = -1.0;
 		json = nullptr;
 	}
 
-	try {
-		QFile file("stylesheet.qss");
-		file.open(QFile::ReadOnly);
-		app.setStyleSheet( QLatin1String( file.readAll() ) );
-	} catch (std::exception &e) {
-		fprintf(stderr, "Unable to load style sheet: %s\n", e.what());
-	}
-
 	Scope sc( FWComm::create( fnam ), sim, nsamples, json );
 	if ( scale > 0.0 ) {
 		int i;
@@ -3193,7 +3253,17 @@ double      scale    = -1.0;
 		sc.setSaveToDir( path );
 	}
 
+	try {
+		QFile file("stylesheet.qss");
+		if ( file.open(QFile::ReadOnly) ) {
+			app.setStyleSheet( QLatin1String( file.readAll() ) );
+		}
+	} catch (std::exception &e) {
+		fprintf(stderr, "Unable to load style sheet: %s\n", e.what());
+	}
+
 	sc.startReader();
+
 
 	sc.show();
 
