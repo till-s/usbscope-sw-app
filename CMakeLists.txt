@@ -62,3 +62,6 @@ add_executable(scope ${SRCS})
 set_target_properties(scope PROPERTIES AUTOMOC ON)
 
 target_link_libraries(scope PRIVATE ${LIBS})
+
+add_executable(flashTool flashTool.cpp)
+target_link_libraries(flashTool PRIVATE fwLib fwcomm)
