@@ -2348,21 +2348,28 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 	// File menu
 	auto fileMen  = menuBar->addMenu( "File" );
 
-	auto act      = unique_ptr<QAction>( new QAction( "Save Waveform To" ) );
-	QObject::connect( act.get(), &QAction::triggered, this, &Scope::saveToFile );
-	fileMen->addAction( act.release() );
+	unique_ptr<QAction> act;
 
-	act           = unique_ptr<QAction>( new QAction( "Comment and Save Waveform To" ) );
-	QObject::connect( act.get(), &QAction::triggered, this, &Scope::editComment );
-	fileMen->addAction( act.release() );
+	if ( 0 == scope_h5_supported() ) {
 
-	act           = unique_ptr<QAction>( new QAction( "Load Settings" ) );
-	QObject::connect( act.get(), &QAction::triggered, this, &Scope::loadSettings );
-	fileMen->addAction( act.release() );
+		act           = unique_ptr<QAction>( new QAction( "Save Waveform To" ) );
+		QObject::connect( act.get(), &QAction::triggered, this, &Scope::saveToFile );
+		fileMen->addAction( act.release() );
 
-	act           = unique_ptr<QAction>( new QAction( "Save Current Settings To" ) );
-	QObject::connect( act.get(), &QAction::triggered, this, &Scope::saveSettings );
-	fileMen->addAction( act.release() );
+		act           = unique_ptr<QAction>( new QAction( "Comment and Save Waveform To" ) );
+		QObject::connect( act.get(), &QAction::triggered, this, &Scope::editComment );
+		fileMen->addAction( act.release() );
+	}
+
+	if ( 0 == scope_json_supported() ) {
+		act           = unique_ptr<QAction>( new QAction( "Load Settings" ) );
+		QObject::connect( act.get(), &QAction::triggered, this, &Scope::loadSettings );
+		fileMen->addAction( act.release() );
+
+		act           = unique_ptr<QAction>( new QAction( "Save Current Settings To" ) );
+		QObject::connect( act.get(), &QAction::triggered, this, &Scope::saveSettings );
+		fileMen->addAction( act.release() );
+	}
 
 
 	act           = unique_ptr<QAction>( new QAction( "Quit" ) );
