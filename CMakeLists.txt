@@ -52,9 +52,11 @@ set(SRCS
 set(LIBS ${QWT} ${QT_LIBS} fwLib fwcomm ${FFTW3})
 if (HDF5_FOUND)
 	list(APPEND LIBS ${HDF5_LIBRARIES})
+	add_compile_definitions( CONFIG_WITH_HDF5=1 )
 endif()
 if (JANSSON_FOUND)
 	list(APPEND LIBS ${JANSSON_LIBRARIES})
+	add_compile_definitions( CONFIG_WITH_JANSSON=1 )
 endif()
 
 include_directories(./ IntrusiveSharedPointer fwcommCPP usbadc-support/sw ${QWT_INC_PATH})
