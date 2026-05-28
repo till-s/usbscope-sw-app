@@ -31,6 +31,7 @@
 #include <QToolButton>
 #include <QStaticText>
 #include <QProgressDialog>
+#include <QDialog>
 
 #include <qwt_text.h>
 #include <qwt_scale_div.h>
@@ -45,6 +46,7 @@
 #include <jsonSup.h>
 #include <fwUtil.h>
 
+#include <ErrorMessage.hpp>
 #include <DataReadyEvent.hpp>
 #include <ScopeReader.hpp>
 #include <Scope.hpp>
@@ -64,6 +66,7 @@
 #include <ChannelObject.hpp>
 #include <DelayVisualizer.hpp>
 #include <FlashProgrammer.hpp>
+#include <ClockGen.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
@@ -145,7 +148,7 @@ public:
 };
 
 
-class Scope : public QObject, public Board, public ScaleXfrmCallback, public KeyPressCallback, public ScopeInterface {
+class Scope : public QObject, public Board, public ScaleXfrmCallback, public KeyPressCallback, public ScopeInterface, public ErrorMessage {
 private:
 	constexpr static int                  CHA_IDX    = 0;
 	constexpr static int                  CHB_IDX    = 1;
@@ -154,7 +157,6 @@ private:
 	unique_ptr<QMainWindow>               mainWin_;
 	QDockWidget                          *fftDockWid_ { nullptr };
 	ScopePlot                            *secPlot_{ nullptr };
-	unsigned                              decimation_;
 	vector<QWidget*>                      vOverRange_;
 	vector<QColor>                        vChannelColors_;
 	vector<QString>                       vChannelStyles_;
@@ -192,6 +194,7 @@ private:
 	string                                paramsFileName_;
 	string                                flashFileName_;
 	DelayVisualizer                      *delayBar_;
+	ClockGenDialog                       *clockGenDialog_{nullptr};
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
@@ -384,6 +387,12 @@ public:
 		return dac_;
 	}
 
+	ClockOutPtr
+	clockOut()
+	{
+		return clockOut_->isPresent() ? clockOut_ : ClockOutPtr();
+	}
+
 	QwtPlotZoomer *
 	getZoom();
 
@@ -403,6 +412,14 @@ public:
 	show()
 	{
 		mainWin_->show();
+	}
+
+	void
+	showClockGen()
+	{
+		if ( clockGenDialog_ ) {
+			clockGenDialog_->show();
+		}
 	}
 
 	void
@@ -648,7 +665,7 @@ public:
 	newData( BufPtr buf );
 
 	void
-	message( const QString &s )
+	message( const QString &s ) override
 	{
 		msgDialog_->setText( s );
 		msgDialog_->exec();
@@ -1807,6 +1824,14 @@ public:
 		update( p );
 	}
 
+	virtual void visit(ClockGen *clkGen)
+	{
+		auto  p           = scp_->currentParams()->clone();
+		p->clockOutFreqHz = clkGen->getDbl();
+		p->clockOutIsRef  = clkGen->isRef();
+		update( p );
+	}
+
 	virtual void update( ScopeParamsPtr desired )
 	{
 		bool   changed = false;
@@ -1965,6 +1990,17 @@ public:
 				if ( ival >= 0 ) {
 					scp_->slowDAC()->setRangeHigh( ch, ival > 0 );
 					changed = true;
+				}
+			}
+		}
+		// only look at clock generator if support was detected initially
+		if ( scp_->clockOut() ) {
+			if ( desired->clockOutIsRef > 0 && 0 == cur->clockOutIsRef ) {
+				scp_->clockOut()->setToReference();
+			} else if ( desired->clockOutIsRef != cur->clockOutIsRef || desired->clockOutFreqHz != cur->clockOutFreqHz ) {
+				printf("desout %g\n", desired->clockOutFreqHz);
+				if ( ! std::isnan( desired->clockOutFreqHz ) ) {
+					scp_->clockOut()->setFrequencyHz( desired->clockOutFreqHz );
 				}
 			}
 		}
@@ -2318,6 +2354,19 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
     delayBar_  = new DelayVisualizer( mainWid.get() );
 	delayBar_->reset();
 
+	if ( clockOut_->isPresent() ) {
+		try {
+			clockGenDialog_ = new ClockGenDialog( clockOut_, this, mainWid.get() );
+			clockGenDialog_->setWindowTitle( "scope - Clock Generator" );
+			clockGenDialog_->subscribe( paramUpd_ );
+		} catch ( std::runtime_error & ) {
+			// not supported
+			clockGenDialog_ = nullptr;
+		}
+	}
+
+	formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
+
 	// main central widget
 	auto centWid  = unique_ptr<QWidget>    ( new QWidget()     );
 	centWid->setLayout( horzLay.release() );
@@ -2403,6 +2452,12 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 
 	// Help menu
 	auto toolMen  = menuBar->addMenu( "Tools" );
+	if ( clockGenDialog_ ) {
+		act           = unique_ptr<QAction>( new QAction( "Clock Generator" ) );
+		QObject::connect( act.get(), &QAction::triggered, this, &Scope::showClockGen );
+		toolMen->addAction( act.release() );
+	}
+
 	act           = unique_ptr<QAction>( new QAction( "Program Firmware to Flash" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::programFlash );
 	toolMen->addAction( act.release() );

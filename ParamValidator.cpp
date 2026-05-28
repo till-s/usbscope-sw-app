@@ -52,10 +52,17 @@ IntParamValidator::IntParamValidator( QLineEdit *edt, int min, int max )
 {
 }
 
+const char *
+IntParamValidator::getFmt() const
+{
+	return "%d";
+}
+
 void
 IntParamValidator::get(QString &s) const
 {
-	s = QString::asprintf("%d", getVal());
+	val_ = getVal();
+	s = QString::asprintf(getFmt(), val_);
 }
 
 void
@@ -72,10 +79,17 @@ DblParamValidator::DblParamValidator( QLineEdit *edt, double min, double max )
 {
 }
 
+const char *
+DblParamValidator::getFmt() const
+{
+	return "%lf";
+}
+
 void
 DblParamValidator::get(QString &s) const
 {
-	s = QString::asprintf("%lf", getVal());
+	val_ = getVal();
+	s = QString::asprintf(getFmt(), val_);
 }
 
 void

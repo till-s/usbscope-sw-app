@@ -47,6 +47,7 @@ set(SRCS
 	"Dispatcher.cpp"
 	"DelayVisualizer.cpp"
 	"FlashProgrammer.cpp"
+	"ClockGen.cpp"
 )
 
 set(LIBS ${QWT} ${QT_LIBS} fwLib fwcomm ${FFTW3})

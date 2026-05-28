@@ -47,7 +47,7 @@ public:
 
 class IntParamValidator : public ParamValidator, public ParamValUpdater {
 protected:
-	int    val_;
+	mutable int val_;
 public:
 	IntParamValidator( QLineEdit *edt, int min, int max );
 
@@ -55,6 +55,9 @@ public:
 	{
 		return val_;
 	}
+
+	virtual const char *
+	getFmt()             const;
 
 	virtual int getVal() const = 0;
 
@@ -70,7 +73,7 @@ public:
 
 class DblParamValidator : public ParamValidator, public ParamValUpdater {
 protected:
-	double val_;
+	mutable double val_;
 public:
 	DblParamValidator( QLineEdit *edt, double min, double max );
 
@@ -78,6 +81,9 @@ public:
 	{
 		return val_;
 	}
+
+	virtual const char *
+	getFmt()                const;
 
 	virtual double getVal() const = 0;
 

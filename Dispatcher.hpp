@@ -22,6 +22,7 @@ class Measurement;
 class MeasDiff;
 class CalDAC;
 class DACRangeTgl;
+class ClockGen;
 
 class ValChangedVisitor
 {
@@ -44,6 +45,7 @@ public:
 	virtual void visit(MeasDiff           *) {}
 	virtual void visit(CalDAC             *) {}
 	virtual void visit(DACRangeTgl        *) {}
+	virtual void visit(ClockGen           *) {}
 
 	virtual ~ValChangedVisitor() = default;
 };
