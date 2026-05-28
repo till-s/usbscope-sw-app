@@ -240,7 +240,7 @@ public:
 	updateFFTScale(ScopeParamsCPtr scopeParams);
 
 	unsigned
-	numChannels() const
+	getNumChannels() const override
 	{
 		return vChannelNames_.size();
 	}
@@ -313,13 +313,13 @@ public:
 	const QColor *
 	getChannelColor(int channel)
 	{
-		if ( channel < 0 || channel >= numChannels() )
+		if ( channel < 0 || channel >= getNumChannels() )
 			throw std::invalid_argument( "invalid channel idx" );
 		return &vChannelColors_[channel];
 	}
 
 	const QString *
-	getChannelName(int channel)
+	getChannelName(int channel) override
 	{
 		if ( channel < 0 || channel >= vChannelNames_.size() )
 			throw std::invalid_argument( "invalid channel idx" );
@@ -700,18 +700,7 @@ protected:
 	}
 };
 
-class ScopeTglButton : public TglButton {
-protected:
-	Scope *scp_;
-public:
-	ScopeTglButton(Scope *scp, const vector<QString> &lbls, int channel = 0, QWidget *parent = nullptr)
-	: TglButton( lbls, channel, parent ),
-	  scp_ ( scp )
-	{
-	}
-};
-
-class DACRangeTgl : public ScopeTglButton {
+class DACRangeTgl : public ScopeTglButton<Scope *> {
 	static vector<QString> labels( Scope *scp, int channel )
 	{
 		vector<QString> rv;
@@ -723,7 +712,7 @@ public:
 	DACRangeTgl( Scope *scp, int channel, QWidget *parent = nullptr )
 	: ScopeTglButton( scp, labels( scp, channel ), channel, parent )
 	{
-		if ( scp_->currentParams()->afeParams[this->channel()].dacRangeHi < 0 ) {
+		if ( dev()->currentParams()->afeParams[this->channel()].dacRangeHi < 0 ) {
 			throw std::runtime_error("No DAC range controls");
 		}
 		updateGUI();
@@ -736,11 +725,11 @@ public:
 
 	virtual bool getVal() override
 	{
-		return scp_->currentParams()->afeParams[channel()].dacRangeHi;
+		return dev()->currentParams()->afeParams[channel()].dacRangeHi;
 	}
 };
 
-class FECTerminationTgl : public ScopeTglButton {
+class FECTerminationTgl : public ScopeTglButton<Scope*> {
 private:
 	std::string         ledName_;
 public:
@@ -756,7 +745,7 @@ public:
 	{
 		bool v = getVal();
 		setLbl( v );
-		scp_->leds()->setVal( ledName_, v );
+		dev()->leds()->setVal( ledName_, v );
 	}
 
 	virtual void accept(ValChangedVisitor *v) override
@@ -773,18 +762,18 @@ public:
 	virtual bool getVal() override
 	{
 		// TODO could use currentParams()
-		return scp_->fec()->getTermination( channel() );
+		return dev()->fec()->getTermination( channel() );
 	}
 };
 
-class FECACCouplingTgl : public ScopeTglButton {
+class FECACCouplingTgl : public ScopeTglButton<ScopeInterface*> {
 public:
 
 	// 'checked' selects 1st label
-	FECACCouplingTgl( Scope *scp, int channel, QWidget * parent = nullptr )
+	FECACCouplingTgl( ScopeInterface *scp, int channel, QWidget * parent = nullptr )
 	: ScopeTglButton( scp, vector<QString>( {"AC", "DC" } ), channel, parent )
 	{
-		if ( scp_->currentParams()->afeParams[this->channel()].fecCouplingAC < 0 ) {
+		if ( dev()->currentParams()->afeParams[this->channel()].fecCouplingAC < 0 ) {
 			throw std::runtime_error("No AC coupling controls");
 		}
 		updateGUI();
@@ -797,15 +786,15 @@ public:
 
 	virtual bool getVal() override
 	{
-		return scp_->currentParams()->afeParams[channel()].fecCouplingAC;
+		return dev()->currentParams()->afeParams[channel()].fecCouplingAC;
 	}
 };
 
-class FECAttenuatorTgl : public ScopeTglButton {
+class FECAttenuatorTgl : public ScopeTglButton<FECPtr> {
 
-	static vector<QString> labels(Scope *scp) {
+	static vector<QString> labels(FECPtr fec) {
 		double min, max;
-		scp->fec()->getDBRange( &min, &max );
+		fec->getDBRange( &min, &max );
 		vector<QString> v;
 		// 'checked' selects 1st label
 		v.push_back( ( std::to_string(int(round(max))) + "dB" ).c_str() );
@@ -815,8 +804,8 @@ class FECAttenuatorTgl : public ScopeTglButton {
 
 public:
 
-	FECAttenuatorTgl( Scope *scp, int channel, QWidget * parent = nullptr )
-	: ScopeTglButton( scp, labels(scp), channel, parent )
+	FECAttenuatorTgl( FECPtr fec, int channel, QWidget * parent = nullptr )
+	: ScopeTglButton( fec, labels(fec), channel, parent )
 	{
 		updateGUI();
 	}
@@ -829,7 +818,7 @@ public:
 	virtual bool getVal() override
 	{
 		// TODO could use currentParams()
-		return scp_->fec()->isAttenuatorOn( channel() );
+		return dev()->isAttenuatorOn( channel() );
 	}
 };
 
@@ -1912,7 +1901,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 		vYScale_.push_back     ( getFullScaleTicks()               );
 	}
 
-	for ( auto ch = 0; ch < numChannels(); ++ch ) {
+	for ( auto ch = 0; ch < getNumChannels(); ++ch ) {
 		unique_ptr<ChannelCtrl> u( new ChannelCtrl( ch ) );
 		vChannelCtrl_.push_back( std::move( u ) );
 	}
@@ -2030,7 +2019,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 
 	// FEC controls
 	bool inpHasTitle = false;
-	for ( int ch = 0; ch < numChannels(); ch++ ) {
+	for ( int ch = 0; ch < getNumChannels(); ch++ ) {
 		vector< unique_ptr< QWidget > > vInp;
 		try {
 			auto w = new FECTerminationTgl( this, ch );
@@ -2045,7 +2034,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 			w->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) {}
 		try {
-			auto w = new FECAttenuatorTgl( this, ch );
+			auto w = new FECAttenuatorTgl( fec(), ch );
 			vInp.push_back( unique_ptr< QWidget >( w ) );
 			w->setStyleSheet( vChannelStyles_[ch] );
 			w->subscribe( paramUpd_ );
@@ -2066,7 +2055,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 
 	// DAC controls
 	bool dacHasTitle = false;
-	for ( int ch = 0; ch < numChannels(); ch++ ) {
+	for ( int ch = 0; ch < getNumChannels(); ch++ ) {
 		std::unique_ptr<CalDAC> dac;
 		try {
 			editWid  = unique_ptr<QLineEdit>  ( new QLineEdit() );
@@ -2228,7 +2217,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 	// View menu
 	auto viewMen  = menuBar->addMenu( "View" );
 
-	for ( size_t ch = 0; ch < numChannels(); ++ch ) {
+	for ( size_t ch = 0; ch < getNumChannels(); ++ch ) {
 		act       = unique_ptr<QAction>( new QAction( QString( "Channel " ) + vChannelNames_[ch] + " Enabled" ) );
 		act->setCheckable( true );
 		act->setChecked( true );
@@ -2786,7 +2775,7 @@ Scope::updateScale( ScaleXfrm *xfrm )
 double
 Scope::getRawSample(int channel, int idx)
 {
-	if ( channel < 0 || channel >= numChannels() || ! curBuf_  ) {
+	if ( channel < 0 || channel >= getNumChannels() || ! curBuf_  ) {
 		return NAN;
 	}
 	if ( idx < 0 ) {
@@ -2800,7 +2789,7 @@ Scope::getRawSample(int channel, int idx)
 double
 Scope::getRawFFTSample(int channel, int idx)
 {
-	if ( channel < 0 || channel >= numChannels() || ! curBuf_  ) {
+	if ( channel < 0 || channel >= getNumChannels() || ! curBuf_  ) {
 		return NAN;
 	}
 	size_t fftSize = curBuf_->getNElms()/2;
@@ -2837,7 +2826,7 @@ Scope::addMeasRow(QGridLayout *grid, QLabel *tit, vector<QLabel *> *pv, Measurem
 	int col = 0;
 	grid->addWidget( tit, row, col, Qt::AlignLeft );
 	++col;
-	for ( int ch = -1; ch < (int) numChannels(); ch++ ) {
+	for ( int ch = -1; ch < (int) getNumChannels(); ch++ ) {
 		if ( -1 != ch || md || msr ) {
 			// ch == -1 creates a deltaX/X label when dealing with a MeasDiff or MeasMarker
 			auto lbl   = unique_ptr<MeasLbl>( new MeasLbl( ch ) );
@@ -3088,7 +3077,7 @@ double      scale    = -1.0;
 	Scope sc( FWComm::create( fnam ), sim, nsamples, json );
 	if ( scale > 0.0 ) {
 		int i;
-		for ( i = 0; i < sc.numChannels(); ++i ) {
+		for ( i = 0; i < sc.getNumChannels(); ++i ) {
 			sc.setVoltScale( i, scale );
 		}
 	}

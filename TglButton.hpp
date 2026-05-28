@@ -32,3 +32,16 @@ public:
 		setLbl( getVal() );
 	}
 };
+
+template <typename T>
+class ScopeTglButton : public TglButton {
+	T dev_;
+public:
+	ScopeTglButton(T dev, const std::vector<QString> &lbls, int channel = 0, QWidget *parent = nullptr)
+	: TglButton( lbls, channel, parent ),
+	  dev_ ( dev )
+	{
+	}
+
+	T dev() { return dev_; }
+};

@@ -69,5 +69,11 @@ public:
 	virtual void
 	loadParams(ScopeParamsCPtr) = 0;
 
+	virtual unsigned
+	getNumChannels() const = 0;
+
+	virtual const QString *
+	getChannelName(int channel) = 0;
+
 	virtual ~ScopeInterface() = default;
 };
