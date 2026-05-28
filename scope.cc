@@ -66,6 +66,7 @@
 #include <ChannelObject.hpp>
 #include <DelayVisualizer.hpp>
 #include <FlashProgrammer.hpp>
+#include <CalDacCtrl.hpp>
 #include <ClockGen.hpp>
 
 using std::unique_ptr;
@@ -700,35 +701,6 @@ protected:
 	}
 };
 
-class DACRangeTgl : public ScopeTglButton<Scope *> {
-	static vector<QString> labels( Scope *scp, int channel )
-	{
-		vector<QString> rv;
-		rv.push_back( (*scp->getChannelName(channel) + " hi-range") );
-		rv.push_back( (*scp->getChannelName(channel) + " lo-range") );
-		return rv;
-	}
-public:
-	DACRangeTgl( Scope *scp, int channel, QWidget *parent = nullptr )
-	: ScopeTglButton( scp, labels( scp, channel ), channel, parent )
-	{
-		if ( dev()->currentParams()->afeParams[this->channel()].dacRangeHi < 0 ) {
-			throw std::runtime_error("No DAC range controls");
-		}
-		updateGUI();
-	}
-
-	virtual void accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-
-	virtual bool getVal() override
-	{
-		return dev()->currentParams()->afeParams[channel()].dacRangeHi;
-	}
-};
-
 class FECTerminationTgl : public ScopeTglButton<Scope*> {
 private:
 	std::string         ledName_;
@@ -1194,46 +1166,6 @@ public:
 		v->visit( this );
 	}
 };
-
-class CalDAC : public DblParamValidator {
-private:
-	unsigned channel_;
-	double   val_;
-	Scope   *scp_;
-public:
-	CalDAC( QLineEdit *edt, Scope *scp, unsigned channel )
-	: DblParamValidator( edt, -1.0, 1.0 ),
-	  channel_         ( channel        ),
-	  scp_             ( scp            )
-	{
-		updateGUI();
-	}
-
-	virtual void
-	updateGUI() override
-	{
-		val_ = getVal();
-		getAction();
-	}
-
-	virtual unsigned
-	getChannel() const
-	{
-		return channel_;
-	}
-
-	virtual double
-	getVal() const override
-	{
-		return scp_->slowDAC()->getVolt( channel_ );
-	}
-
-	virtual void accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-};
-
 
 class NPreTriggerSamples : public DblParamValidator, public MovableMarker, public ValChangedVisitor {
 private:
@@ -2060,7 +1992,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 		try {
 			editWid  = unique_ptr<QLineEdit>  ( new QLineEdit() );
 			editWid->setStyleSheet( vChannelStyles_[ch] );
-			dac = unique_ptr<CalDAC> ( new CalDAC( editWid.release(), this, ch ) );
+			dac = unique_ptr<CalDAC> ( new CalDAC( editWid.release(), slowDAC(), ch ) );
 			dac->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) {}
 		if ( dac ) {

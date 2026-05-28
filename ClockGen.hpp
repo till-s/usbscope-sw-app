@@ -23,7 +23,6 @@ public:
 	}
 
 	virtual void updateGUI() override {
-		double v = val_;
 		getAction();
 	}
 };
