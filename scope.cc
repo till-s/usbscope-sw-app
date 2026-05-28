@@ -46,7 +46,6 @@
 #include <jsonSup.h>
 #include <fwUtil.h>
 
-#include <ErrorMessage.hpp>
 #include <DataReadyEvent.hpp>
 #include <ScopeReader.hpp>
 #include <Scope.hpp>
@@ -116,7 +115,6 @@ namespace {
 };
 
 class Scope;
-class TrigArmMenu;
 enum class TrigArmState : int { OFF = 0, SINGLE = 1, CONTINUOUS = 2 };
 class TrigLevel;
 class ParamUpdateVisitor;
@@ -148,7 +146,7 @@ public:
 };
 
 
-class Scope : public QObject, public Board, public ScaleXfrmCallback, public KeyPressCallback, public ScopeInterface, public ErrorMessage {
+class Scope : public QObject, public Board, public ScaleXfrmCallback, public KeyPressCallback, public ScopeInterface {
 private:
 	constexpr static int                  CHA_IDX    = 0;
 	constexpr static int                  CHB_IDX    = 1;
@@ -834,42 +832,6 @@ public:
 		return scp_->fec()->isAttenuatorOn( channel() );
 	}
 };
-
-class TrigEdgMenu : public ParamMenuButton {
-private:
-	Scope *scp_;
-
-	static vector<QString>
-	mkStrings(Scope *scp)
-	{
-		vector<QString> rv;
-		rv.push_back( "Rising"  );
-		rv.push_back( "Falling" );
-		return rv;
-	}
-
-public:
-	TrigEdgMenu(Scope *scp, QWidget *parent = nullptr)
-	: ParamMenuButton( mkStrings( scp ), parent ),
-	  scp_(scp)
-	{
-		updateGUI();
-	}
-
-	virtual void updateGUI() override
-	{
-		bool rising;
-		scp_->acq()->getTriggerSrc( nullptr, &rising );
-		setMenuEntry( rising ? 0 : 1 );
-	}
-
-	virtual void
-	accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-};
-
 
 class TrigArmMenu : public ParamMenuButton {
 private:
@@ -2042,7 +2004,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 
 	// Trigger edge
 	{
-	mnu           = new TrigEdgMenu( this );
+	mnu           = new TrigEdgMenu( acq() );
 	mnu->subscribe( paramUpd_ );
 	formLay->addRow( new QLabel( "Trigger Edge"      ), mnu );
 	}

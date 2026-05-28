@@ -4,15 +4,15 @@
 
 #include <QDialog>
 
-#include <ErrorMessage.hpp>
+#include <Scope.hpp>
 #include <ParamValidator.hpp>
 
 
 class ClockGen: public DblParamValidator {
-	ClockOutPtr   clk_;
-	ErrorMessage *err_;
+	ClockOutPtr     clk_;
+	ScopeInterface *scp_;
 public:
-	ClockGen(ClockOutPtr clk, QLineEdit *edt, ErrorMessage *err);
+	ClockGen(ClockOutPtr clk, QLineEdit *edt, ScopeInterface *scp);
 
 	virtual double getVal() const override;
 
@@ -25,14 +25,13 @@ public:
 	virtual void updateGUI() override {
 		double v = val_;
 		getAction();
-		printf("updategui pre %g, post %g\n", v, val_);
 	}
 };
 
 class ClockGenDialog : public QDialog {
 	ClockGen *clockGen_;
 public:
-	ClockGenDialog(ClockOutPtr clk, ErrorMessage *err, QWidget *parent = nullptr);
+	ClockGenDialog(ClockOutPtr clk, ScopeInterface *scp, QWidget *parent = nullptr);
 
 	virtual void subscribe(ParamChangedVisitor *v) {
 		clockGen_->subscribe( v );

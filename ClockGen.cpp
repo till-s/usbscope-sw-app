@@ -9,10 +9,10 @@
 
 using std::unique_ptr;
 
-ClockGen::ClockGen(ClockOutPtr clk, QLineEdit *edt, ErrorMessage *err)
+ClockGen::ClockGen(ClockOutPtr clk, QLineEdit *edt, ScopeInterface *scp)
 : DblParamValidator( edt, clk->getMinFrequencyHz(), clk->getMaxFrequencyHz() ),
   clk_             ( clk                                                     ),
-  err_             ( err                                                     )
+  scp_             ( scp                                                     )
 {
 	updateGUI();
 }
@@ -25,13 +25,13 @@ ClockGen::getVal() const
 		std::pair<double, bool> cur = clk_->getFrequencyHz();
 		return cur.first;
 	} catch (FWCommError &e) {
-		err_->message( QString::asprintf("Clock Generator: unable to read frequency: %s", e.what()) );
+		scp_->message( QString::asprintf("Clock Generator: unable to read frequency: %s", e.what()) );
 		return 0.0/0.0;
 	}
 }
 
 
-ClockGenDialog::ClockGenDialog(ClockOutPtr clk, ErrorMessage *err, QWidget *parent)
+ClockGenDialog::ClockGenDialog(ClockOutPtr clk, ScopeInterface *scp, QWidget *parent)
 : QDialog( parent )
 {
 	setModal( false );
@@ -41,7 +41,7 @@ ClockGenDialog::ClockGenDialog(ClockOutPtr clk, ErrorMessage *err, QWidget *pare
 	lbl->setAlignment( Qt::AlignCenter );
 	frm->addRow( lbl.release() );
 	unique_ptr<QLineEdit>   edt( new QLineEdit() );
-	clockGen_ = new ClockGen( clk, edt.get(), err );
+	clockGen_ = new ClockGen( clk, edt.get(), scp );
 	frm->addRow( "Frequency [Hz]", edt.release() );
 
 	setLayout( frm.release() );

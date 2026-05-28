@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include <QString>
+
 #include <FWComm.hpp>
 #include <ADCBuf.hpp>
 #include <SysPipe.hpp>
@@ -58,6 +60,8 @@ public:
 
 class ScopeInterface {
 public:
+	// pop up a notification
+	virtual void message(const QString &) = 0;
 
 	virtual ScopeParamsCPtr
 	currentParams() = 0;

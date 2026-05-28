@@ -2,9 +2,8 @@
 
 #include <stdio.h>
 
-namespace {
 std::vector<QString>
-mkStrings()
+TrigSrcMenu::mkStrings()
 {
 	std::vector<QString> rv;
 	rv.push_back( "Channel A" );
@@ -12,13 +11,12 @@ mkStrings()
 	rv.push_back( "External"  );
 	return rv;
 }
-}
 
-TrigSrcMenu::TrigSrcMenu(AcqCtrl *acqCtrl, VChannelCtrl *vChannelCtrl, ErrorMessage *err, QWidget *parent)
+TrigSrcMenu::TrigSrcMenu(AcqCtrl *acqCtrl, VChannelCtrl *vChannelCtrl, ScopeInterface *scp, QWidget *parent)
 : ParamMenuButton( mkStrings(), parent ),
   acqCtrl_       ( acqCtrl             ),
   vChannelCtrl_  ( vChannelCtrl        ),
-  err_           ( err                 )
+  scp_           ( scp                 )
 {
 	updateGUI();
 }
@@ -56,7 +54,7 @@ TrigSrcMenu::notify(TxtAction *act)
 	}
 	if ( newSrc < vChannelCtrl_->size() ) {
 		if ( ! vChannelCtrl_->at( newSrc )->enabled() ) {
-			err_->message("Selected trigger channel currently disabled.\nPlease enable first.");
+			scp_->message("Selected trigger channel currently disabled.\nPlease enable first.");
 			return;
 		}
 	}
@@ -70,7 +68,7 @@ TrigSrcMenu::channelEnableChanged( ChannelCtrl *ctrl )
 	// if currently enabled and the trigger source then
 	// refuse the imminent disablement
 	if ( ctrl->enabled() && (getSrc() == ctrl->getChannel() ) ) {
-		err_->message("The channel you want to disable is currently the trigger source.\nPlease switch the trigger source first.");
+		scp_->message("The channel you want to disable is currently the trigger source.\nPlease switch the trigger source first.");
 		return false;
 	}
 	return true;
@@ -106,4 +104,26 @@ ExtTrigOutEnTgl::getVal()
 	return rv;
 }
 
+std::vector<QString>
+TrigEdgMenu::mkStrings()
+{
+	std::vector<QString> rv;
+	rv.push_back( "Rising"  );
+	rv.push_back( "Falling" );
+	return rv;
+}
 
+TrigEdgMenu::TrigEdgMenu( AcqCtrl *acqCtrl, QWidget *parent )
+: ParamMenuButton( mkStrings(), parent ),
+  acqCtrl_       ( acqCtrl             )
+{
+	updateGUI();
+}
+
+void
+TrigEdgMenu::updateGUI()
+{
+	bool rising;
+	acqCtrl_->getTriggerSrc( nullptr, &rising );
+	setMenuEntry( rising ? 0 : 1 );
+}

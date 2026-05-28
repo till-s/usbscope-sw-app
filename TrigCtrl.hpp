@@ -7,9 +7,9 @@
 
 #include <QString>
 
+#include <Scope.hpp>
 #include <MenuButton.hpp>
 #include <ChannelObject.hpp>
-#include <ErrorMessage.hpp>
 #include <TglButton.hpp>
 #include <Dispatcher.hpp>
 
@@ -17,13 +17,16 @@ class TrigSrcMenu : public ParamMenuButton, public ChannelEnableChanged {
 public:
 	using VChannelCtrl = std::vector<std::unique_ptr<ChannelCtrl>>;
 private:
-	AcqCtrl       *acqCtrl_;
-	VChannelCtrl  *vChannelCtrl_;
-	ErrorMessage  *err_;
-	TriggerSource  src_;
+	AcqCtrl        *acqCtrl_;
+	VChannelCtrl   *vChannelCtrl_;
+	ScopeInterface *scp_;
+	TriggerSource   src_;
+
+	static std::vector<QString>
+	mkStrings();
 
 public:
-	TrigSrcMenu(AcqCtrl *acqCtrl, VChannelCtrl *vChannelCtrl, ErrorMessage *err, QWidget *parent = nullptr);
+	TrigSrcMenu(AcqCtrl *acqCtrl, VChannelCtrl *vChannelCtrl, ScopeInterface *scp, QWidget *parent = nullptr);
 
 	virtual void
 	updateGUI() override;
@@ -63,4 +66,24 @@ public:
 
 	virtual bool
 	getVal() override;
+};
+
+class TrigEdgMenu : public ParamMenuButton {
+private:
+	AcqCtrl *acqCtrl_;
+
+	static std::vector<QString>
+	mkStrings();
+
+public:
+	TrigEdgMenu(AcqCtrl *acqCtrl, QWidget *parent = nullptr);
+
+	virtual void
+	updateGUI() override;
+
+	virtual void
+	accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
 };
