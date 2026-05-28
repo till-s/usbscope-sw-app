@@ -32,6 +32,7 @@ set(SRCS
 	"SysPipe.cpp"
 	"ScopeReader.cpp"
 	"MovableMarkers.cpp"
+	"TrigCtrl.cpp"
 	"ScopeZoomer.cpp"
 	"ScopePlot.cpp"
 	"ScaleXfrm.cpp"

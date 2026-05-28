@@ -50,6 +50,7 @@
 #include <DataReadyEvent.hpp>
 #include <ScopeReader.hpp>
 #include <Scope.hpp>
+#include <TrigCtrl.hpp>
 #include <MovableMarkers.hpp>
 #include <KeyPressCallback.hpp>
 #include <ScopeZoomer.hpp>
@@ -117,7 +118,6 @@ namespace {
 class Scope;
 class TrigArmMenu;
 enum class TrigArmState : int { OFF = 0, SINGLE = 1, CONTINUOUS = 2 };
-class TrigSrcMenu;
 class TrigLevel;
 class ParamUpdateVisitor;
 
@@ -699,88 +699,6 @@ protected:
 		}
 
 		return QObject::eventFilter(obj, event);
-	}
-};
-
-class TrigSrcMenu : public ParamMenuButton, public ChannelEnableChanged {
-private:
-	Scope        *scp_;
-	TriggerSource src_;
-
-	vector<QString>
-	mkStrings(Scope *scp)
-	{
-		vector<QString> rv;
-		rv.push_back( "Channel A" );
-		rv.push_back( "Channel B" );
-		rv.push_back( "External"  );
-		return rv;
-	}
-
-public:
-	TrigSrcMenu(Scope *scp, QWidget *parent = nullptr)
-	: ParamMenuButton( mkStrings( scp ), parent ),
-	  scp_(scp)
-	{
-		updateGUI();
-	}
-
-	virtual void updateGUI() override
-	{
-		scp_->acq()->getTriggerSrc( &src_, nullptr );
-		unsigned sel = numMenuEntries() - 1;
-		printf("src %d, sel %d\n", src_, sel);
-		if ( src_ < sel ) {
-			sel = src_;
-		}
-		setMenuEntry( sel );
-	}
-
-	virtual TriggerSource
-	getSrc()
-	{
-		return src_;
-	}
-
-	virtual void
-	notify(TxtAction *act) override
-	{
-		// update cached value
-		const QString &s = act->text();
-		TriggerSource newSrc;
-		if ( s == "Channel A" ) {
-			newSrc = CHA;
-		} else if ( s == "Channel B" ) {
-			newSrc = CHB;
-		} else {
-			newSrc = EXT;
-		}
-		if ( newSrc < scp_->numChannels() ) {
-			if ( ! scp_->getChannelCtrl( newSrc )->enabled() ) {
-				scp_->message("Selected trigger channel currently disabled.\nPlease enable first.");
-				return;
-			}
-		}
-		src_ = newSrc;
-		ParamMenuButton::notify( act );
-	}
-
-	virtual void
-	accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-
-	virtual bool
-	channelEnableChanged( ChannelCtrl *ctrl ) override
-	{
-		// if currently enabled and the trigger source then
-		// refuse the imminent disablement
-		if ( ctrl->enabled() && (getSrc() == ctrl->getChannel() ) ) {
-			scp_->message("The channel you want to disable is currently the trigger source.\nPlease switch the trigger source first.");
-			return false;
-		}
-		return true;
 	}
 };
 
@@ -2153,7 +2071,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 
 	// Trigger source
 	{
-	trgSrc_       = new TrigSrcMenu( this );
+	trgSrc_       = new TrigSrcMenu( acq(), &vChannelCtrl_, this );
 	trgSrc_->subscribe( paramUpd_ );
     trgSrc_->subscribe( trigLvl_  );
 	for ( auto it = vChannelCtrl_.begin(); it != vChannelCtrl_.end(); ++it ) {
