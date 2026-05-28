@@ -7,6 +7,7 @@
 
 #include <Scope.hpp>
 #include <QApplication>
+#include <QProgressDialog>
 #include <QThread>
 #include <AcqCtrl.hpp>
 #include <DataReadyEvent.hpp>
@@ -126,4 +127,23 @@ public:
 	}
 
 	~ScopeReader();
+};
+
+class Planner : public QThread {
+	ScopeReader *reader_;
+	QProgressDialog *dialog_;
+public:
+	Planner(ScopeReader *r, QProgressDialog *d) : reader_(r), dialog_(d)
+	{
+	}
+
+protected:
+	virtual void
+	run() override {
+		/* Unfortunately, we cannot interrupt the planning not get progress info;
+		 * only can let the user abort the program if they don't want to wait...
+		 */
+		reader_->createFFTWPlan();
+		QMetaObject::invokeMethod( dialog_, "setValue", Qt::QueuedConnection, Q_ARG(int, 1));
+	}
 };
