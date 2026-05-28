@@ -87,3 +87,26 @@ public:
 		v->visit( this );
 	}
 };
+
+class TrigAutMenu : public ParamMenuButton {
+private:
+	AcqCtrl *acqCtrl_;
+
+	static std::vector<QString>
+	mkStrings();
+
+public:
+	TrigAutMenu( AcqCtrl *acqCtrl, QWidget *parent = nullptr );
+
+	virtual bool
+	isAutoOn();
+
+	virtual void
+	updateGUI() override;
+
+	virtual void
+	accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+};

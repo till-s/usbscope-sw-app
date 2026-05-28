@@ -914,46 +914,6 @@ public:
 	}
 };
 
-class TrigAutMenu : public ParamMenuButton {
-private:
-	Scope *scp_;
-
-	static vector<QString>
-	mkStrings(Scope *scp)
-	{
-		vector<QString> rv;
-		rv.push_back( "On"  );
-		rv.push_back( "Off" );
-		return rv;
-	}
-
-public:
-	TrigAutMenu(Scope *scp, QWidget *parent = nullptr)
-	: ParamMenuButton( mkStrings( scp ), parent ),
-	  scp_ ( scp )
-	{
-		updateGUI();
-	}
-
-	virtual bool isAutoOn()
-	{
-		return 0 == getMenuEntry();
-	}
-
-	virtual void updateGUI() override
-	{
-		bool autoOn = (scp_->acq()->getAutoTimeoutMS() >= 0);
-		setMenuEntry( autoOn ? 0 : 1 );
-	}
-
-	virtual void
-	accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-};
-
-
 class TrigLevel : public ParamValidator, public MovableMarker, public ParamValUpdater, public ValChangedVisitor {
 private:
 	Scope         *scp_;
@@ -2011,7 +1971,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 
 	// Trigger auto-rearm
 	{
-	mnu           = new TrigAutMenu( this );
+	mnu           = new TrigAutMenu( acq() );
 	mnu->subscribe( paramUpd_ );
 	formLay->addRow( new QLabel( "Trigger Auto"      ), mnu );
 	}

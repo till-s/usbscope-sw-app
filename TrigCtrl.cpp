@@ -127,3 +127,32 @@ TrigEdgMenu::updateGUI()
 	acqCtrl_->getTriggerSrc( nullptr, &rising );
 	setMenuEntry( rising ? 0 : 1 );
 }
+
+std::vector<QString>
+TrigAutMenu::mkStrings()
+{
+	std::vector<QString> rv;
+	rv.push_back( "On"  );
+	rv.push_back( "Off" );
+	return rv;
+}
+
+TrigAutMenu::TrigAutMenu( AcqCtrl *acqCtrl, QWidget *parent )
+: ParamMenuButton( mkStrings(), parent ),
+  acqCtrl_       ( acqCtrl             )
+{
+	updateGUI();
+}
+
+bool
+TrigAutMenu::isAutoOn()
+{
+	return 0 == getMenuEntry();
+}
+
+void
+TrigAutMenu::updateGUI()
+{
+	bool autoOn = (acqCtrl_->getAutoTimeoutMS() >= 0);
+	setMenuEntry( autoOn ? 0 : 1 );
+}
