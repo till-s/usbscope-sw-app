@@ -75,3 +75,35 @@ TrigSrcMenu::channelEnableChanged( ChannelCtrl *ctrl )
 	}
 	return true;
 }
+
+ExtTrigOutEnTgl::ExtTrigOutEnTgl( AcqCtrl *acqCtrl, QWidget * parent )
+: TglButton( std::vector<QString>( {"Output", "Input" } ), 0, parent ),
+     acqCtrl_ ( acqCtrl )
+{
+	updateGUI();
+}
+
+void
+ExtTrigOutEnTgl::visit(TrigSrcMenu *trgSrc)
+{
+	if ( trgSrc->getSrc() == EXT ) {
+		// firmware switches output off automatically; update
+		// label accordingly
+		setLblOff();
+	}
+}
+
+void
+ExtTrigOutEnTgl::setLblOff()
+{
+		setLbl( 0 );
+}
+
+bool
+ExtTrigOutEnTgl::getVal()
+{
+	bool rv = acqCtrl_->getExtTrigOutEnable();
+	return rv;
+}
+
+

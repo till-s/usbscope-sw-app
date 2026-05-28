@@ -10,6 +10,8 @@
 #include <MenuButton.hpp>
 #include <ChannelObject.hpp>
 #include <ErrorMessage.hpp>
+#include <TglButton.hpp>
+#include <Dispatcher.hpp>
 
 class TrigSrcMenu : public ParamMenuButton, public ChannelEnableChanged {
 public:
@@ -40,4 +42,25 @@ public:
 
 	virtual bool
 	channelEnableChanged( ChannelCtrl *ctrl ) override;
+};
+
+class ExtTrigOutEnTgl : public TglButton, public ValChangedVisitor {
+	AcqCtrl *acqCtrl_;
+public:
+	ExtTrigOutEnTgl( AcqCtrl *acqCtrl, QWidget * parent = nullptr );
+
+	virtual void
+	visit(TrigSrcMenu *trgSrc);
+
+	virtual void
+	setLblOff();
+
+	virtual void
+	accept(ValChangedVisitor *v) override
+	{
+		v->visit( this );
+	}
+
+	virtual bool
+	getVal() override;
 };

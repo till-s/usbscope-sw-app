@@ -702,7 +702,7 @@ protected:
 	}
 };
 
-class ScopeTglButton : public TglButton, public ParamValUpdater {
+class ScopeTglButton : public TglButton {
 protected:
 	Scope *scp_;
 public:
@@ -710,11 +710,6 @@ public:
 	: TglButton( lbls, channel, parent ),
 	  scp_ ( scp )
 	{
-	}
-
-	virtual void updateGUI() override
-	{
-		setLbl( getVal() );
 	}
 };
 
@@ -837,41 +832,6 @@ public:
 	{
 		// TODO could use currentParams()
 		return scp_->fec()->isAttenuatorOn( channel() );
-	}
-};
-
-class ExtTrigOutEnTgl : public ScopeTglButton, public ValChangedVisitor {
-public:
-	ExtTrigOutEnTgl( Scope *scp, QWidget * parent = nullptr )
-	: ScopeTglButton( scp, vector<QString>( {"Output", "Input" } ), 0, parent )
-	{
-		updateGUI();
-	}
-
-	virtual void visit(TrigSrcMenu *trgSrc)
-	{
-		if ( trgSrc->getSrc() == EXT ) {
-			// firmware switches output off automatically; update
-			// label accordingly
-			setLblOff();
-		}
-	}
-
-	virtual void setLblOff()
-	{
-			setLbl( 0 );
-	}
-
-	virtual void accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-
-	virtual bool getVal() override
-	{
-		// TODO could use currentParams()
-		bool rv = scp_->acq()->getExtTrigOutEnable();
-		return rv;
 	}
 };
 
@@ -2103,7 +2063,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 
 	// Control of ext. GPIO
 	{
-    auto extOutEnU = unique_ptr<ExtTrigOutEnTgl>( new ExtTrigOutEnTgl( this ) );
+    auto extOutEnU = unique_ptr<ExtTrigOutEnTgl>( new ExtTrigOutEnTgl( acq() ) );
 	auto extOutEn  = extOutEnU.get();
 	formLay->addRow( new QLabel( "Ext. Trig. GPIO") , extOutEn );
 	extOutEnU.release();

@@ -7,7 +7,7 @@
 
 #include <Dispatcher.hpp>
 
-class TglButton : public QPushButton, public virtual ValUpdater {
+class TglButton : public QPushButton, public virtual ParamValUpdater {
 protected:
 	std::vector<QString>    lbls_;
 	int                     chnl_;
@@ -26,4 +26,9 @@ public:
 	activated(bool checked);
 
 	virtual bool getVal(    ) = 0;
+
+	virtual void updateGUI() override
+	{
+		setLbl( getVal() );
+	}
 };
