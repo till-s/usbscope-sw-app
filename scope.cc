@@ -67,6 +67,7 @@
 #include <DelayVisualizer.hpp>
 #include <FlashProgrammer.hpp>
 #include <CalDacCtrl.hpp>
+#include <FECCtrl.hpp>
 #include <ClockGen.hpp>
 
 using std::unique_ptr;
@@ -698,99 +699,6 @@ protected:
 		}
 
 		return QObject::eventFilter(obj, event);
-	}
-};
-
-class FECTerminationTgl : public ScopeTglButton<Scope*> {
-private:
-	std::string         ledName_;
-public:
-	// 'checked' selects 1st label
-	FECTerminationTgl( Scope *scp, int channel, QWidget * parent = nullptr )
-	: ScopeTglButton( scp, vector<QString>( {"50Ohm", "1MOhm" } ), channel, parent ),
-	  ledName_( std::string("Term") + scp->getChannelName( channel )->toStdString() )
-	{
-		updateGUI();
-	}
-
-	virtual void updateGUI() override
-	{
-		bool v = getVal();
-		setLbl( v );
-		dev()->leds()->setVal( ledName_, v );
-	}
-
-	virtual void accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-
-	virtual const std::string &
-	ledName() const
-	{
-		return ledName_;
-	}
-
-	virtual bool getVal() override
-	{
-		// TODO could use currentParams()
-		return dev()->fec()->getTermination( channel() );
-	}
-};
-
-class FECACCouplingTgl : public ScopeTglButton<ScopeInterface*> {
-public:
-
-	// 'checked' selects 1st label
-	FECACCouplingTgl( ScopeInterface *scp, int channel, QWidget * parent = nullptr )
-	: ScopeTglButton( scp, vector<QString>( {"AC", "DC" } ), channel, parent )
-	{
-		if ( dev()->currentParams()->afeParams[this->channel()].fecCouplingAC < 0 ) {
-			throw std::runtime_error("No AC coupling controls");
-		}
-		updateGUI();
-	}
-
-	virtual void accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-
-	virtual bool getVal() override
-	{
-		return dev()->currentParams()->afeParams[channel()].fecCouplingAC;
-	}
-};
-
-class FECAttenuatorTgl : public ScopeTglButton<FECPtr> {
-
-	static vector<QString> labels(FECPtr fec) {
-		double min, max;
-		fec->getDBRange( &min, &max );
-		vector<QString> v;
-		// 'checked' selects 1st label
-		v.push_back( ( std::to_string(int(round(max))) + "dB" ).c_str() );
-		v.push_back( ( std::to_string(int(round(min))) + "dB" ).c_str() );
-		return v;
-	}
-
-public:
-
-	FECAttenuatorTgl( FECPtr fec, int channel, QWidget * parent = nullptr )
-	: ScopeTglButton( fec, labels(fec), channel, parent )
-	{
-		updateGUI();
-	}
-
-	virtual void accept(ValChangedVisitor *v) override
-	{
-		v->visit( this );
-	}
-
-	virtual bool getVal() override
-	{
-		// TODO could use currentParams()
-		return dev()->isAttenuatorOn( channel() );
 	}
 };
 
@@ -1954,7 +1862,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 	for ( int ch = 0; ch < getNumChannels(); ch++ ) {
 		vector< unique_ptr< QWidget > > vInp;
 		try {
-			auto w = new FECTerminationTgl( this, ch );
+			auto w = new FECTerminationTgl( this, ch, leds() );
 			w->setStyleSheet( vChannelStyles_[ch] );
 			vInp.push_back( unique_ptr< FECTerminationTgl >( w ) );
 			w->subscribe( paramUpd_ );
@@ -1966,7 +1874,7 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 			w->subscribe( paramUpd_ );
 		} catch ( std::runtime_error & ) {}
 		try {
-			auto w = new FECAttenuatorTgl( fec(), ch );
+			auto w = new FECAttenuatorTgl( this, fec(), ch );
 			vInp.push_back( unique_ptr< QWidget >( w ) );
 			w->setStyleSheet( vChannelStyles_[ch] );
 			w->subscribe( paramUpd_ );
