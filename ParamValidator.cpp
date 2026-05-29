@@ -29,6 +29,7 @@ ParamValidator::setAction()
 void
 ParamValidator::getAction()
 {
+	read();
 	QString s;
 	get( s );
 	edt_->setText( s );
@@ -61,7 +62,6 @@ IntParamValidator::getFmt() const
 void
 IntParamValidator::get(QString &s) const
 {
-	val_ = getVal();
 	s = QString::asprintf(getFmt(), val_);
 }
 
@@ -88,14 +88,12 @@ DblParamValidator::getFmt() const
 void
 DblParamValidator::get(QString &s) const
 {
-	val_ = getVal();
 	s = QString::asprintf(getFmt(), val_);
 }
 
 void
 DblParamValidator::set(const QString &s)
 {
-	printf("Set %s\n", s.toStdString().c_str());
 	val_ = s.toDouble();
 	setVal();
 	valChanged();

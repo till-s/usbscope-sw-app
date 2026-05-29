@@ -24,12 +24,6 @@ public:
 		updateGUI();
 	}
 
-	virtual void
-	updateGUI() override
-	{
-		getAction();
-	}
-
 	virtual unsigned
 	getChannel() const
 	{
@@ -37,7 +31,7 @@ public:
 	}
 
 	virtual double
-	getVal() const override
+	getVal() override
 	{
 		return dac_->getVolt( channel_ );
 	}

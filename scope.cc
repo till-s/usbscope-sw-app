@@ -868,12 +868,9 @@ public:
 		}
 	}
 
-
-	virtual double
-	getVal() const
+	virtual void
+	read()
 	{
-		// return normalized volts for the GUI
-		return raw2Volt( percent2Raw( lvl_ ) );
 	}
 
 	virtual void
@@ -1057,14 +1054,8 @@ public:
 		updateGUI();
 	}
 
-	virtual void updateGUI() override
-	{
-		val_ = getVal();
-		getAction();
-	}
-
 	virtual int
-	getVal() const override
+	getVal() override
 	{
 		return scp_->currentParams()->getDecimation();
 	}
@@ -1118,7 +1109,7 @@ public:
 	}
 
 	virtual double
-	getVal() const override
+	getVal() override
 	{
 		return val_;
 	}
@@ -1659,7 +1650,6 @@ public:
 				scp_->clockOut()->setToReference();
 				changed = true;
 			} else if ( desired->clockOutIsRef != cur->clockOutIsRef || desired->clockOutFreqHz != cur->clockOutFreqHz ) {
-				printf("desout %g\n", desired->clockOutFreqHz);
 				if ( ! std::isnan( desired->clockOutFreqHz ) ) {
 					scp_->clockOut()->setFrequencyHz( desired->clockOutFreqHz );
 					changed = true;

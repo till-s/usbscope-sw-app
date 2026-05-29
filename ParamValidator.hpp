@@ -26,11 +26,21 @@ public:
 	virtual void
 	getAction();
 
+	// convert cached value into string
 	virtual void
 	get(QString &)       const = 0;
 
+	// write-through to hardware
 	virtual void
 	set(const QString &)       = 0;
+
+	// read into/update cached value
+	// Note: subclasses need a cached value
+	// because 'fixup()' is const. We apparently
+	// need 'fixup()' to restore a botched user entry
+	// (inputRejected() doesn't work as expected).
+	virtual void
+	read()                     = 0;
 
 	void
 	fixup(QString &s) const override;
@@ -47,7 +57,7 @@ public:
 
 class IntParamValidator : public ParamValidator, public ParamValUpdater {
 protected:
-	mutable int val_;
+	int val_;
 public:
 	IntParamValidator( QLineEdit *edt, int min, int max );
 
@@ -59,7 +69,12 @@ public:
 	virtual const char *
 	getFmt()             const;
 
-	virtual int getVal() const = 0;
+	virtual void read() override
+	{
+		val_ = getVal();
+	}
+
+	virtual int getVal() = 0;
 
 	virtual void setVal()
 	{
@@ -69,6 +84,11 @@ public:
 	virtual void get(QString &s) const override;
 
 	virtual void set(const QString &s) override;
+
+	virtual void updateGUI() override
+	{
+		getAction();
+	}
 };
 
 class DblParamValidator : public ParamValidator, public ParamValUpdater {
@@ -85,11 +105,21 @@ public:
 	virtual const char *
 	getFmt()                const;
 
-	virtual double getVal() const = 0;
+	virtual double getVal() = 0;
 
 	virtual void setVal()
 	{
 		// default does nothing
+	}
+
+	virtual void read() override
+	{
+		val_ = getVal();
+	}
+
+	virtual void updateGUI() override
+	{
+		getAction();
 	}
 
 	virtual void get(QString &s) const override;
