@@ -1320,6 +1320,37 @@ public:
 };
 
 // Visitor to forward GUI settings to the device
+//  1. GUI elements add this visitor to their subscribers after
+//     creation.
+//  2. When something is modified in the GUI then a GUI element
+//     calls 'valueChanged' causing it to accept all subscribed
+//     visitors - including ParamUpdateVisitor.
+//  3. The 'visit' overload matching the GUI element clones
+//     the current parameter cache and modifies settings according
+//     to the requests by the GUI.
+//  4. 'visit' calls 'update()' with the new parameter set which
+//     causes the new cache to be written to hardware.
+//
+// The class is also a 'ParamChangedVisitor' which helps with
+// the inverse operation (change parameters programmatically and
+// update the GUI to reflect the changes).
+//
+//  1. parameters are loaded from JSON
+//  2. parameters are passed to
+//
+//       ParamUpdateVisitor::update( newParams )
+//
+//     which writes then new parameters out to the hardware.
+//
+//  3. call
+//
+//       ParamUpdateVisitor::updateGUI();
+//
+//  4. the list of GUI elements to which the ParamUpdateVisitor
+//     was subscribed (cf. 1) - which is an 'inverse subscription'
+//     is traversed and each element's updateGUI() is called in turn.
+//  5. Elements read values from the cache of current parameters and
+//     updates the GUI state to be consistent with the parameters.
 class ParamUpdateVisitor : public ParamChangedVisitor {
 	Scope *scp_;
 public:
@@ -1626,10 +1657,12 @@ public:
 		if ( scp_->clockOut() ) {
 			if ( desired->clockOutIsRef > 0 && 0 == cur->clockOutIsRef ) {
 				scp_->clockOut()->setToReference();
+				changed = true;
 			} else if ( desired->clockOutIsRef != cur->clockOutIsRef || desired->clockOutFreqHz != cur->clockOutFreqHz ) {
 				printf("desout %g\n", desired->clockOutFreqHz);
 				if ( ! std::isnan( desired->clockOutFreqHz ) ) {
 					scp_->clockOut()->setFrequencyHz( desired->clockOutFreqHz );
+					changed = true;
 				}
 			}
 		}
