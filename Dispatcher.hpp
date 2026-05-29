@@ -23,6 +23,8 @@ class MeasDiff;
 class CalDAC;
 class DACRangeTgl;
 class ClockGen;
+class VersaClkFODRouter;
+class VersaClkOutDiv;
 
 class ValChangedVisitor
 {
@@ -46,6 +48,8 @@ public:
 	virtual void visit(CalDAC             *) {}
 	virtual void visit(DACRangeTgl        *) {}
 	virtual void visit(ClockGen           *) {}
+	virtual void visit(VersaClkOutDiv     *) {}
+	virtual void visit(VersaClkFODRouter  *) {}
 
 	virtual ~ValChangedVisitor() = default;
 };

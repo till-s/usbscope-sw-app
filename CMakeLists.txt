@@ -50,6 +50,7 @@ set(SRCS
 	"FlashProgrammer.cpp"
 	"ClockGen.cpp"
 	"CalDacCtrl.cpp"
+	"VersaClkDbg.cpp"
 )
 
 set(LIBS ${QWT} ${QT_LIBS} fwLib fwcomm ${FFTW3})

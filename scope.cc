@@ -69,6 +69,7 @@
 #include <CalDacCtrl.hpp>
 #include <FECCtrl.hpp>
 #include <ClockGen.hpp>
+#include <VersaClkDbg.hpp>
 
 using std::unique_ptr;
 using std::shared_ptr;
@@ -147,6 +148,12 @@ public:
 	}
 };
 
+struct ScopeCfg {
+	bool        sim         { false      };
+	unsigned    nsamples    { 0          };
+	const char *jsonFnam    { nullptr    };
+	unsigned    versaClkDbg { 0          };
+};
 
 class Scope : public QObject, public Board, public ScaleXfrmCallback, public KeyPressCallback, public ScopeInterface {
 private:
@@ -195,6 +202,7 @@ private:
 	string                                flashFileName_;
 	DelayVisualizer                      *delayBar_;
 	ClockGenDialog                       *clockGenDialog_{nullptr};
+	VersaClkDbg                          *clockDbgDialog_{nullptr};
 
 	std::pair<unique_ptr<QHBoxLayout>, QWidget *>
 	mkGainControls( int channel, QColor &color );
@@ -207,7 +215,7 @@ private:
 
 public:
 
-	Scope(FWPtr fw, bool sim=false, unsigned nsamples = 0, const char *jsonFnam = nullptr, QObject *parent = nullptr);
+	Scope(FWPtr fw, const ScopeCfg &, QObject *parent = nullptr);
 	~Scope();
 
 	unique_ptr<ScopePlot>
@@ -421,6 +429,15 @@ public:
 			clockGenDialog_->show();
 		}
 	}
+
+	void
+	showClockDbg()
+	{
+		if ( clockDbgDialog_ ) {
+			clockDbgDialog_->show();
+		}
+	}
+
 
 	void
 	clrTrgLED()
@@ -1663,10 +1680,9 @@ public:
 
 };
 
-
-Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObject *parent)
+Scope::Scope(FWPtr fw, const ScopeCfg &cfg, QObject *parent)
 : QObject        ( parent                       ),
-  Board          ( fw, sim                      ),
+  Board          ( fw, cfg.sim                  ),
   plotScales_    ( NUM_CHNLS                    ),
   fftScales_     ( NUM_CHNLS                    ),
   reader_        ( nullptr                      ),
@@ -1686,8 +1702,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 	{
 		ScopeParamsPtr p;
 
-		if ( jsonFnam ) {
-			paramsFileName_ = jsonFnam;
+		if ( cfg.jsonFnam ) {
+			paramsFileName_ = cfg.jsonFnam;
 			p = paramsPool_.get();
 			if ( scope_json_load( (*this)->scope(), paramsFileName_.c_str(), p.get() ) ) {
 				throw std::runtime_error( string("Loading JSON file '") + paramsFileName_ + "' failed." );
@@ -1697,8 +1713,8 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 			}
 		}
 
-		if ( nsamples ) {
-			nsmpl_ = nsamples;
+		if ( cfg.nsamples ) {
+			nsmpl_ = cfg.nsamples;
 		}
 
 		if ( nsmpl_ > acq_.getMaxNSamples() ) {
@@ -2017,6 +2033,9 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 		}
 	}
 
+	clockDbgDialog_ = new VersaClkDbg( this, mainWid.get() );
+	clockGenDialog_->setWindowTitle( "scope - VersaClk Diagnostics" );
+
 	formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
 
 	// main central widget
@@ -2109,6 +2128,12 @@ Scope::Scope(FWPtr fw, bool sim, unsigned nsamples, const char *jsonFnam, QObjec
 		QObject::connect( act.get(), &QAction::triggered, this, &Scope::showClockGen );
 		toolMen->addAction( act.release() );
 	}
+	if ( clockDbgDialog_ ) {
+		act           = unique_ptr<QAction>( new QAction( "VersaClock Diagnostics/Debugging" ) );
+		QObject::connect( act.get(), &QAction::triggered, this, &Scope::showClockDbg );
+		toolMen->addAction( act.release() );
+	}
+
 
 	act           = unique_ptr<QAction>( new QAction( "Program Firmware to Flash" ) );
 	QObject::connect( act.get(), &QAction::triggered, this, &Scope::programFlash );
@@ -2858,11 +2883,9 @@ int
 main(int argc, char **argv)
 {
 const char *fnam     = getenv("FWCOMM_DEVICE");
-bool        sim      = false;
-unsigned    nsamples = 0;
 bool        safeQuit = true;
 const char *path     = nullptr;
-const char *json     = nullptr;
+ScopeCfg    scopeCfg;
 int         opt;
 unsigned   *u_p;
 double     *d_p;
@@ -2880,19 +2903,21 @@ double      scale    = -1.0;
 	//
 	QApplication app(argc, argv);
 
-	while ( (opt = getopt( argc, argv, "d:hn:p:rsS:j:" )) > 0 ) {
+	while ( (opt = getopt( argc, argv, "d:hn:p:rsS:j:V" )) > 0 ) {
 		u_p = nullptr;
 		d_p = nullptr;
 		s_p = nullptr;
 		switch ( opt ) {
-			case 'd': fnam = optarg;     break;
-			case 'h': usage( argv[0] );  return 0;
-			case 'j': json = optarg;     break;
-			case 'n': s_p  = optarg;     break;
-			case 'p': path     = optarg; break;
-			case 'r': safeQuit = false;  break;
-			case 's': sim  = true;       break;
-			case 'S': d_p  = &scale;     break;
+			case 'd': fnam = optarg;           break;
+			case 'h': usage( argv[0] );        return 0;
+			case 'j': scopeCfg.jsonFnam = optarg;  break;
+			case 'n': s_p  = optarg;           break;
+			case 'p': path     = optarg;       break;
+			case 'r': safeQuit = false;        break;
+			case 's': scopeCfg.sim = true;     break;
+			case 'S': d_p  = &scale;           break;
+			// need multiple V to enable debugging widgets
+			case 'V': scopeCfg.versaClkDbg++;  break;
 			default:
 				fprintf(stderr, "Error: Unknown option -%c\n", opt);
 				usage( argv[0] );
@@ -2907,14 +2932,14 @@ double      scale    = -1.0;
 			return 1;
 		}
 		if ( s_p ) {
-			switch ( sscanf( s_p, "%i%c", &nsamples, &units ) ) {
+			switch ( sscanf( s_p, "%i%c", &scopeCfg.nsamples, &units ) ) {
 				case 2:
 					switch ( toupper( units ) ) {
 						case 'M':
-							nsamples *= 1024;
+							scopeCfg.nsamples *= 1024;
 							/* fall through */
 						case 'K':
-							nsamples *= 1024;
+							scopeCfg.nsamples *= 1024;
 							break;
 						default:
 							fprintf(stderr, "Error: invalid units '%c'\n", units);
@@ -2928,16 +2953,22 @@ double      scale    = -1.0;
 					fprintf(stderr, "Error: unable to scan argument of option -%c\n", opt);
 					return 1;
 			}
-			printf("Nsamples from commandline: 0x%x, %u\n", nsamples, nsamples);
+			printf("Nsamples from commandline: 0x%x, %u\n", scopeCfg.nsamples, scopeCfg.nsamples);
 		}
 	}
 
-	if ( json && 0 != scope_json_supported() ) {
-		fprintf(stderr, "JSON support not compiled in - disabling\n");
-		json = nullptr;
+	if ( scopeCfg.versaClkDbg < 3 ) {
+		scopeCfg.versaClkDbg = 0;
+	} else {
+		scopeCfg.versaClkDbg = 1;
 	}
 
-	Scope sc( FWComm::create( fnam ), sim, nsamples, json );
+	if ( scopeCfg.jsonFnam && 0 != scope_json_supported() ) {
+		fprintf(stderr, "JSON support not compiled in - disabling\n");
+		scopeCfg.jsonFnam = nullptr;
+	}
+
+	Scope sc( FWComm::create( fnam ), scopeCfg );
 	if ( scale > 0.0 ) {
 		int i;
 		for ( i = 0; i < sc.getNumChannels(); ++i ) {
