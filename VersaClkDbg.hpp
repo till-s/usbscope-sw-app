@@ -11,10 +11,11 @@
 #include <Scope.hpp>
 #include <ParamValidator.hpp>
 #include <MenuButton.hpp>
+#include <ClockGen.hpp>
 
 typedef std::shared_ptr<VersaClk> VersaClkPtr;
 
-class VersaClkOutDiv : public DblParamValidator {
+class VersaClkOutDiv : public DblParamValidator, public ValChangedVisitor {
 private:
 	VersaClkPtr clk_;
 	unsigned    channel_;
@@ -24,13 +25,13 @@ public:
 	  clk_             ( clk               ),
 	  channel_         ( channel           )
 	{
+		updateGUI();
 	}
 
 	virtual double
 	getVal() override
 	{
 		double v = clk_->getOutDiv( channel_ );
-		printf("OutDiv getVal %g\n", v);
 		return v;
 	}
 
@@ -45,9 +46,15 @@ public:
 	{
 		v->visit( this );
 	}
+
+	virtual void
+	visit(ClockGen *) override
+	{
+		updateGUI();
+	}
 };
 
-class VersaClkFODRouter : public ParamMenuButton {
+class VersaClkFODRouter : public ParamMenuButton, public ValChangedVisitor {
 private:
 	VersaClkPtr clk_;
 	unsigned    channel_;
@@ -57,13 +64,13 @@ public:
 	  clk_           ( clk                                                 ),
 	  channel_       ( channel                                             )
 	{
+		updateGUI();
 	}
 
 	virtual void
 	updateGUI() override
 	{
 		unsigned v = static_cast<unsigned>( clk_->getFODRoute( channel_ ) );
-		printf("updateGUI %u\n", v);
 		setMenuEntry( v );
 	}
 
@@ -71,6 +78,12 @@ public:
 	accept(ValChangedVisitor *v) override
 	{
 		v->visit( this );
+	}
+
+	virtual void
+	visit(ClockGen *) override
+	{
+		updateGUI();
 	}
 
 	virtual void
@@ -82,7 +95,9 @@ public:
 };
 
 class VersaClkDbg : public QDialog {
+	std::vector<ValChangedVisitor *> listeners_;
 public:
 	VersaClkDbg(BoardInterface *brd, QWidget *parent);
 
+	virtual void subscribeTo(ClockGenDialog *);
 };

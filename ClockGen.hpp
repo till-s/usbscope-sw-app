@@ -45,6 +45,11 @@ public:
 		clockGen_->subscribe( v );
 	}
 
+	virtual void subscribe(ValChangedVisitor *v) {
+		clockGen_->subscribe( v );
+	}
+
+
 	void isRefChanged(Qt::CheckState);
 	void isRefChangedQt5(int);
 };

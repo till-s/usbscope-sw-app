@@ -2033,8 +2033,15 @@ Scope::Scope(FWPtr fw, const ScopeCfg &cfg, QObject *parent)
 		}
 	}
 
-	clockDbgDialog_ = new VersaClkDbg( this, mainWid.get() );
-	clockGenDialog_->setWindowTitle( "scope - VersaClk Diagnostics" );
+	if ( cfg.versaClkDbg ) {
+		clockDbgDialog_ = new VersaClkDbg( this, mainWid.get() );
+		clockDbgDialog_->setWindowTitle( "scope - VersaClk Diagnostics" );
+		if ( clockGenDialog_ ) {
+			// IMPORTANT to subscribe *after* subscribing to paramUpd
+			// so that the debug dialog picks up changes made by paramUpd
+			clockDbgDialog_->subscribeTo( clockGenDialog_ );
+		}
+	}
 
 	formLay  = unique_ptr<QFormLayout>( new QFormLayout() );
 
@@ -2223,7 +2230,6 @@ unique_ptr<QWidget>
 Scope::mkFFTPlot()
 {
 	secPlot_ = new FFTPlot( &vChannelColors_ );
-	printf("second plot %p\n", secPlot_);
 
 	auto horzLay  = unique_ptr<QHBoxLayout>( new QHBoxLayout() );
 	horzLay->addWidget( secPlot_, 8 );
@@ -2294,7 +2300,6 @@ Scope::~Scope()
 	if ( paramUpd_ ) {
 		delete paramUpd_;
 	}
-	printf("Leaving scope destructor\n");
 }
 
 bool
@@ -2511,7 +2516,6 @@ Scope::stopReader()
 	curBuf_.reset();
 	delete reader_;
 	reader_ = nullptr;
-	printf("reader stopped\n");
 }
 
 QwtPlotZoomer *
