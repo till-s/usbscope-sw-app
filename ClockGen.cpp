@@ -51,11 +51,6 @@ ClockGen::setIsRef(bool val)
 	updateGUI();
 }
 
-// For debugging - give direct access to FOD, out dividers
-class FODMenu : public ParamMenuButton {
-};
-
-
 ClockGenDialog::ClockGenDialog(ClockOutPtr clk, ScopeInterface *scp, QWidget *parent)
 : QDialog( parent )
 {
