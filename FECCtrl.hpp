@@ -109,6 +109,6 @@ public:
 	virtual bool
 	getVal() override
 	{
-		return dev()->currentParams()->afeParams[channel()].fecAttDb < (min_ + max_)/2.0;
+		return dev()->currentParams()->afeParams[channel()].fecAttDb > (min_ + max_)/2.0;
 	}
 };
