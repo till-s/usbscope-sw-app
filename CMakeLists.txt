@@ -54,7 +54,7 @@ find_library(JANSSON NAMES jansson)
 set(AUTOMOC ON)
 
 set(SRCS
-	"scope.cc"
+	"Scope.cpp"
 	"SysPipe.cpp"
 	"ScopeReader.cpp"
 	"MovableMarkers.cpp"
