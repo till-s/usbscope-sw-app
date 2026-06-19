@@ -25,6 +25,7 @@
  **LE-MIT*/
 
 #include <FWComm.hpp>
+#include <FileMap.hpp>
 #include <Flash.hpp>
 #include <getopt.h>
 
@@ -35,16 +36,44 @@
 #include <stdio.h>
 
 class Prog : public FlashWriterProgress {
+    bool verbose_;
+public:
+	Prog(bool verbose = false) : verbose_(verbose)
+	{
+	}
+
 	virtual int advance(const FlashWriterState *state) override {
+		if ( verbose_ ) {
 		char c;
-		switch (state->operation) {
-			case Operation::ERASE:          c = 'E'; break;
-			case Operation::VERIFY_ERASED:  c = 'Z'; break;
-			case Operation::VERIFY_WRITTEN: c = 'V'; break;
-			case Operation::WRITE         : c = 'W'; break;
+			switch (state->operation) {
+				case Operation::ERASE:          c = 'E'; break;
+				case Operation::VERIFY_ERASED:  c = 'Z'; break;
+				case Operation::VERIFY_WRITTEN: c = 'V'; break;
+				case Operation::WRITE         : c = 'W'; break;
+			}
+			printf("%c[%3u]: %8u, %8u, %8u\n", c, state->index, state->address, state->size, state->completed);
+		} else {
+		const char *s;
+			switch (state->operation) {
+				case Operation::ERASE:          s = "Erasure      "; break;
+				case Operation::VERIFY_ERASED:  s = "Erasure Check"; break;
+				case Operation::VERIFY_WRITTEN: s = "Verifying    ";; break;
+				case Operation::WRITE         : s = "Writing      "; break;
+			}
+			if ( 0 == state->index && Operation::ERASE != state->operation ) {
+				printf("\n");
+			}
+			printf("\r[%s] %3.0f%%", s, 100.0*(double)state->completed/(double)state->size);
+			fflush(stdout);
 		}
-		printf("%c[%3u]: %8u, %8u, %8u\n", c, state->index, state->address, state->size, state->completed);
 		return 0;
+	}
+
+	~Prog()
+	{
+		if ( ! verbose_ ) {
+			printf("\n");
+		}
 	}
 };
 
@@ -78,23 +107,27 @@ main(int argc, char **argv)
 	Flash flash( fw );
 	if ( ! fnam ) {
 		uint8_t buf[100];
-		ssize_t got = flash.read(0, buf, sizeof(buf));
+		ssize_t got = flash.read(buf, sizeof(buf));
+		ssize_t i;
 		printf("Reading first 100 bytes from flash:\n");
-		for ( ssize_t i = 0; i < got; ++i ) {
-			printf("0x%02x\n", buf[i]);
+		for ( i = 0; i < got; ++i ) {
+			printf("0x%02x%c", buf[i], ((i & 0xf) == 0xf ? '\n' : ' '));
+		}
+		if ( (i & 0xf) != 0 ) {
+			printf("\n");
 		}
 	} else {
-		uint8_t *data = (uint8_t*)MAP_FAILED;
-		off_t    sz;
-		if ( fileMap(fnam,  &data, &sz, 0, 1) < 0 ) {
-			fprintf(stderr, "fileMap failed");
-			return 1;
-		}
+		{
+		FileReadMap map( fnam );
 		Prog progress;
-		printf("data %p, size %zu\n", data, sz);
-
-		Flash::WriteEnable ena(&flash);
-		flash.erase(0, sz, &progress);
-		flash.write(0, data, sz, &progress);
+		flash.write(map.getMap(), map.getSize(), &progress);
+		}
+		if ( fw_reconfigure_fpga_on_close( fw->fw_, FW_RECONFIGURE_FPGA ) < 0 ) {
+			printf("Firmware does not support recongration of FPGA;\n");
+			printf("Please trigger reconfiguration manually.\n");
+		} else {
+			fw.reset();
+			printf("FPGA reconfigured.\n");
+		}
 	}
 }

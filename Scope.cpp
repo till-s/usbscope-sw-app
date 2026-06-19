@@ -199,7 +199,7 @@ private:
 	vector<QLabel*>                       vMeanLbls_;
 	vector<QLabel*>                       vStdLbls_;
 	vector<QLabel*>                       vMeasLbls_;
-	MessageDialog                        *msgDialog_;
+	QMessageBox                          *msgDialog_;
 	QMessageBox                          *hlpDialog_;
 	QMessageBox                          *abtDialog_;
 	PlotScales                            plotScales_;
@@ -528,7 +528,7 @@ public:
 	quitAndExit()
 	{
 		quit();
-		exit(0);
+		QCoreApplication::quit();
 	}
 
 	void
@@ -559,23 +559,40 @@ public:
 		if ( fileName.empty() ) {
 			return;
 		}
-		uint8_t               *binData;
-		off_t                  binDataSize;
-		int                    status;
-		static constexpr off_t creatSz  = 0;
-		static constexpr int   readOnly = 1;
-		status = fileMap( fileName.c_str(), &binData, &binDataSize, creatSz, readOnly );
-		if ( status < 0 ) {
-			message( QString::asprintf("Unable to open and map %s: %s", fileName.c_str(), strerror( -status ) ) );
+
+		std::shared_ptr<FileReadMap> map;
+
+		try {
+			map = std::make_shared<FileReadMap>( fileName );
+		} catch ( std::system_error & e ) {
+			message( QString("Unable to map file: ") + e.what() );
 			return;
 		}
 
-		std::unique_ptr<FlashProgrammer> programmer( new FlashProgrammer( mainWin_.get(), flash_, binData, binDataSize ) );
+		bool reconfigurationSupported = (0 == fw_reconfigure_fpga_supported( (*this)->fwp()->fw_ ));
+
+		QString msg = "Flash will be written; OK to proceed?";
+
+		if ( QMessageBox::Ok != message( msg, QMessageBox::Ok | QMessageBox::Cancel ) ) {
+			return;
+		}
+
+		std::unique_ptr<FlashProgrammer> programmer( new FlashProgrammer( mainWin_.get(), fwp(), map ) );
+		
 		const FlashError * err = programmer->exec();
 		if ( err ) {
-			message(QString("Flash Programming FAILED: ") + err->what());
+			message( QString("Flash Programming FAILED: ") + err->what() );
 		} else {
-			message("Flash Successfully Written\nDon't forget to reconfigure FPGA (e.g., power-cycle)!");
+			if ( reconfigurationSupported ) {
+				QString msg = "Flash successfully written\nReconfigure the FPGA and exit the application?";
+				if ( QMessageBox::Ok != message( msg, QMessageBox::Ok | QMessageBox::Cancel ) ) {
+					return;
+				}
+				fw_reconfigure_fpga_on_close( (*this)->fwp()->fw_, FW_RECONFIGURE_FPGA );
+				quitAndExit();
+			} else {
+				message( "Flash Successfully Written\nDon't forget to reconfigure FPGA (e.g., power-cycle)!" );
+			}
 		}
 		flashFileName_ = fileName;
 	}
@@ -707,11 +724,12 @@ public:
 	void
 	newData( BufPtr buf );
 
-	void
-	message( const QString &s ) override
+	int
+	message( const QString &s, QMessageBox::StandardButtons buttons = QMessageBox::Ok ) override
 	{
 		msgDialog_->setText( s );
-		msgDialog_->exec();
+		msgDialog_->setStandardButtons( buttons );
+		return msgDialog_->exec();
 	}
 
 	virtual void
@@ -2011,7 +2029,7 @@ Scope::Scope(FWPtr fw, const ScopeCfg &cfg, QObject *parent)
 	npts->attach( plot_ );
 	plot_->addMarker( npts );
 
-	// instantiate measurement markers
+	// instantiate measurement marker );
 	plot_->instantiateMovableMarkers();
 
 	auto vertLay  = unique_ptr<QVBoxLayout>( new QVBoxLayout() );
@@ -2020,7 +2038,8 @@ Scope::Scope(FWPtr fw, const ScopeCfg &cfg, QObject *parent)
 
 	// message dialog
 	QString msgTitle( "UsbScope Message" );
-	msgDialog_ = new MessageDialog( mainWid.get(), &msgTitle );
+	msgDialog_ = new QMessageBox( mainWid.get() );
+	msgDialog_->setWindowTitle( msgTitle );
 
 	hlpDialog_ = new QMessageBox( mainWid.get() );
 	hlpDialog_->setTextFormat( Qt::MarkdownText );

@@ -27,22 +27,23 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include <QThread>
 #include <QProgressDialog>
 #include <QLabel>
 
 #include <Board.hpp>
+#include <FileMap.hpp>
 
 class FlashProgrammer : public QThread, public FlashWriterProgress {
-	FlashPtr                         flash_;
-	const uint8_t                   *data_;
-	size_t                           dataSize_;
 	std::unique_ptr<QProgressDialog> dialog_;
 	QLabel                          *label_;
 	FlashError                       error_;
+	std::shared_ptr<FileReadMap>     map_;
+	FWPtr                            fwp_;
 public:
-	FlashProgrammer( QWidget *parent, FlashPtr, const uint8_t *, size_t );
+	FlashProgrammer( QWidget *parent, FWPtr fwp, std::shared_ptr<FileReadMap> map );
 	virtual ~FlashProgrammer() = default;
 
 	virtual int advance( const FlashWriterState* ) override;

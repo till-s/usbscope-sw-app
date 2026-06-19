@@ -29,6 +29,7 @@
 #include <memory>
 
 #include <QString>
+#include <QMessageBox>
 
 #include <FWComm.hpp>
 #include <ADCBuf.hpp>
@@ -87,7 +88,7 @@ public:
 class ScopeInterface {
 public:
 	// pop up a notification
-	virtual void message(const QString &) = 0;
+	virtual int message(const QString &, QMessageBox::StandardButtons buttons = QMessageBox::Ok) = 0;
 
 	virtual ScopeParamsCPtr
 	currentParams() = 0;

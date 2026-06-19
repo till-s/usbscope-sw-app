@@ -33,15 +33,14 @@ namespace {
 	static const QString verifyMsg       ( "Verifying Flash"            );
 }
 
-FlashProgrammer::FlashProgrammer(QWidget *parent, FlashPtr flash, const uint8_t *data, size_t sz)
-: flash_   (flash),
-  data_    (data ),
-  dataSize_( sz  )
+FlashProgrammer::FlashProgrammer( QWidget *parent, FWPtr fwp, std::shared_ptr<FileReadMap> map )
+: fwp_ ( fwp ),
+  map_ ( map )
 {
 	dialog_ = std::unique_ptr<QProgressDialog>( new QProgressDialog( parent ) );
 	dialog_->setMinimum( 0         );
 	// temporary max.
-	dialog_->setMaximum( dataSize_ );
+	dialog_->setMaximum( map_->getSize() );
 	dialog_->setMinimumDuration( 2000 );
 	dialog_->setWindowModality( Qt::WindowModal );
 	dialog_->setCancelButton( nullptr );
@@ -52,12 +51,15 @@ FlashProgrammer::FlashProgrammer(QWidget *parent, FlashPtr flash, const uint8_t 
 int
 FlashProgrammer::advance(const FlashWriterState *state)
 {
+printf("Advance; state %d\n", static_cast<int>(state->operation));
 	if ( 0 == state->index ) {
 		QMetaObject::invokeMethod( dialog_.get(), "setMaximum", Qt::QueuedConnection, Q_ARG(int, state->size));
+printf("advance setting max\n");
 	}
 
     const QString *msg = nullptr;
 	if ( state->completed == state->size ) {
+printf("completed!\n");
 		switch ( state->operation ) {
 			case Operation::ERASE        :   msg = &verifyErasedMsg; break;
 			case Operation::VERIFY_ERASED:   msg = &writeMsg;        break;
@@ -67,7 +69,7 @@ FlashProgrammer::advance(const FlashWriterState *state)
 	}
 
 	if ( msg ) {
-        QMetaObject::invokeMethod( dialog_.get(), "setValue", Qt::QueuedConnection, Q_ARG(int, 0) );
+		QMetaObject::invokeMethod( dialog_.get(), "setValue", Qt::QueuedConnection, Q_ARG(int, 0) );
 		QMetaObject::invokeMethod( dialog_.get(), "setLabelText",  Qt::QueuedConnection, Q_ARG(const QString &, *msg));
 	} else {
 		QMetaObject::invokeMethod( dialog_.get(), "setValue", Qt::QueuedConnection, Q_ARG(int, state->completed));
@@ -88,28 +90,31 @@ void
 FlashProgrammer::run()
 {
 	try {
-#ifdef TESTING
+#define TESTING 0
+#if     TESTING > 0
 		std::vector<Operation> v({Operation::ERASE, Operation::VERIFY_ERASED, Operation::WRITE, Operation::VERIFY_WRITTEN});
+		FlashWriterState state(this);
 		for ( auto it = v.begin(); it != v.end(); ++it ) {
-			unsigned chunk = dataSize_ / 4;
-			FlashWriterState state(this, *it);
-			state.size = dataSize_;
+		    state.operation = *it;
+			unsigned chunk = map_->getSize() / 4;
+			state.size = map_->getSize();
 			for (state.completed = 0; state.completed < state.size; state.completed += chunk ) {
 				advance(&state);
 				sleep(1);
 			}
 			if ( Operation::VERIFY_WRITTEN == *it ) {
+#if TESTING > 1
 				throw FlashError(-EIO, "BOO");
+#endif
 			}
 			state.completed = state.size;
 			advance(&state);
 			sleep(1);
 		}
 #else
-		Flash::WriteEnable enabler( flash_.get() );
+		Flash flash( fwp_ );
 		static constexpr unsigned addressInFlash = 0;
-		flash_->erase( addressInFlash, dataSize_, this );
-		flash_->write( addressInFlash, data_, dataSize_, this );
+		flash.write( map_->getMap(), map_->getSize(), addressInFlash, this );
 #endif
 	} catch ( const FlashError & e ) {
 		error_ = e;
