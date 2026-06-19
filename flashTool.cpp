@@ -126,6 +126,8 @@ main(int argc, char **argv)
 			printf("Firmware does not support recongration of FPGA;\n");
 			printf("Please trigger reconfiguration manually.\n");
 		} else {
+			// releasing the  pointer results in closing
+			// the TTY which will trigger reconfiguration
 			fw.reset();
 			printf("FPGA reconfigured.\n");
 		}
